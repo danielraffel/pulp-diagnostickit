@@ -21,6 +21,16 @@ When run, it collects the things that explain a "won't load":
 It then writes everything into a report and either drops a **ZIP on the
 Desktop** (default, no setup) or opens a **GitHub issue** (optional).
 
+## When to use it
+
+Best for **early distribution / beta** and **one-off "can you run this and send
+me the result?"** moments — when a tester or user hits "it doesn't load" and you
+need the facts from *their* machine. It is **intentionally minimal** — not a
+polished product experience by design — but it's far friendlier than asking a
+non-technical user to run Terminal commands, and it's just **one** easy way to
+collect that data. It's an optional add-on; reach for it when sharing test
+builds, not as a default part of a public release.
+
 ## Two output modes
 
 | Mode | When | Setup |
