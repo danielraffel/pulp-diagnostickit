@@ -1,0 +1,21 @@
+# Build output
+.build/
+build/
+JUCE/build/
+JUCE/.cache/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad
+
+# Instance configuration (generated per-project from .env.example — never commit;
+# it carries project-specific identifiers / support email and is machine-local).
+.env
+
+# macOS cruft
+.DS_Store
+**/.DS_Store
+
+# Built app bundles / archives
+*.app
+*.dmg
+*.zip
