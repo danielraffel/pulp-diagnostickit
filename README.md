@@ -1,6 +1,6 @@
 # DiagnosticKit
 
-> **An optional developer add-on for [Pulp](https://github.com/danielraffel/pulp).**
+> **An optional developer add-on for [Pulp](https://github.com/Generous-Corp/pulp).**
 > Not part of Pulp core, not required to build or ship a Pulp plugin. It's a
 > small "double-click and send me the results" helper for **debugging a failed
 > install on someone else's machine** — when a user says "your plugin didn't
