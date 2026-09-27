@@ -15,8 +15,27 @@ When run, it collects the things that explain a "won't load":
   **quarantine xattr**, and **executable architecture (arm64 / x86_64)** — which
   is what catches "Intel Mac vs an arm64-only build" and "downloaded copy got
   quarantined"
-- **Pulp model state** (for model-backed plugins), recent **crash logs**, and a
-  full **`auval`** run
+- **Build information** per installed bundle — version, the bundle's
+  `pulp-build-info.json` (product/SDK revisions and the Skia, Dawn and
+  wgpu-native pins it was built with), and for every executable and bundled
+  library: architectures, minimum macOS, signature, and any `@rpath`
+  dependency that does not resolve inside the installed bundle
+- **Gatekeeper / notarization** verdicts (`spctl --assess`, `stapler`)
+- **Installer history** — `pkgutil` receipts and each install session in
+  `/var/log/install.log`, judged completed / failed / unfinished, plus free
+  disk space
+- **Audio Unit registration** (`auval -a`) and a full **`auval -v`** run
+- **GPU / Metal** support, **crash and hang reports that mention the product**
+  (including host crashes such as a DAW crashing with the plug-in loaded), and
+  the last hour of **system log** lines naming it
+- **Pulp model state** (model-backed plugins only, when `PULP_MODEL_PATH` is set)
+
+The report opens with **Likely Problems**: the conclusions drawn from all of
+the above (not installed, duplicate or mismatched installs, wrong architecture,
+macOS too old, broken signature, unresolved library, AU not registered or
+failing validation, failed install), so the cause is the first thing a reader
+sees. Raw evidence (`auval.txt`, install-log and system-log excerpts, crash
+reports) goes into the ZIP next to the report.
 
 It then writes everything into a report and either drops a **ZIP on the
 Desktop** (default, no setup) or opens a **GitHub issue** (optional).
@@ -59,6 +78,7 @@ cp .env.example .env && $EDITOR .env
 BUILD_TYPE=release ./Scripts/build_app.sh
 
 # Verify headlessly: drops a diagnostics ZIP on the Desktop and prints its path
+# (DIAGNOSTICKIT_OUTPUT_DIR=/some/dir writes it there instead)
 ./build/*Diagnostics.app/Contents/MacOS/* --selftest
 ```
 
