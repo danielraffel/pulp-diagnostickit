@@ -76,6 +76,20 @@ mkdir -p "$APP_PATH/Contents/Resources"
 cp "$BINARY_PATH" "$APP_PATH/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_PATH/Contents/MacOS/$APP_NAME"
 
+# SwiftPM records absolute LC_RPATHs into the build machine's toolchain
+# (/usr/lib/swift and the Xcode swift-X.Y/macosx directory). The app links no
+# @rpath library -- the Swift runtime and frameworks resolve by absolute OS
+# paths -- so these entries only point at this machine, and an installer's
+# relocatability check rightly rejects them. Refuse to ship if a real @rpath
+# dependency ever appears, rather than stripping something it needs.
+if otool -L "$APP_PATH/Contents/MacOS/$APP_NAME" | tail -n +2 | grep -q "@rpath/"; then
+    echo -e "${RED}Error: the binary links an @rpath library; its rpaths cannot be stripped${NC}"
+    exit 1
+fi
+otool -l "$APP_PATH/Contents/MacOS/$APP_NAME" | awk '/cmd LC_RPATH/{getline; getline; print $2}' | while read -r rpath; do
+    install_name_tool -delete_rpath "$rpath" "$APP_PATH/Contents/MacOS/$APP_NAME"
+done
+
 # Copy .env into Resources
 cp ".env" "$APP_PATH/Contents/Resources/"
 
