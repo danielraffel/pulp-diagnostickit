@@ -242,21 +242,45 @@ struct MainView: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
 
-            GroupBox {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Archive:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    Text((path as NSString).lastPathComponent)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
+            // The archive itself, draggable: drop it into Mail, Messages or a
+            // chat window to share it without going through Finder.
+            VStack(spacing: 6) {
+                GroupBox {
+                    HStack(spacing: 10) {
+                        Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+                            .resizable()
+                            .frame(width: 32, height: 32)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Archive:")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text((path as NSString).lastPathComponent)
+                                .font(.system(.caption, design: .monospaced))
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "hand.draw")
+                            .foregroundColor(.secondary)
+                    }
+                    .contentShape(Rectangle())
                 }
+                .onDrag {
+                    NSItemProvider(contentsOf: URL(fileURLWithPath: path)) ?? NSItemProvider()
+                }
+                .help("Drag to Mail or Messages to share")
+
+                Text("Optional: drag this to Mail or Messages to share it.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
 
             Spacer()
 
             HStack {
+                ShareLink(item: URL(fileURLWithPath: path)) {
+                    Label("Share…", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.bordered)
+
                 Button("Reveal in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
                 }
@@ -364,6 +388,12 @@ class DiagnosticViewModel: ObservableObject {
         self.collector = DiagnosticCollector(config: config)
         self.uploader = GitHubUploader(config: config)
         self.archiver = LocalArchiveWriter(config: config)
+        // Opens directly on the saved-archive screen for an existing ZIP, so
+        // that screen can be checked without a full collection run.
+        if let archive = ProcessInfo.processInfo.environment["DIAGNOSTICKIT_PREVIEW_ARCHIVE"],
+           FileManager.default.fileExists(atPath: archive) {
+            state = .successLocal(archive)
+        }
     }
 
     func collectAndSubmit(userFeedback: String) async {

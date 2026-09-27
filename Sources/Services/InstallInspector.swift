@@ -203,8 +203,17 @@ struct InstallInspector {
                 "No installer receipts were found for \(config.pluginName)."))
         } else {
             section.markdown += "## Receipts\n\n```\n"
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .short
             for id in pkgs {
-                section.markdown += run("/usr/sbin/pkgutil", ["--pkg-info", id], nil).output
+                for line in run("/usr/sbin/pkgutil", ["--pkg-info", id], nil).output.split(separator: "\n") {
+                    if line.hasPrefix("install-time: "), let epoch = TimeInterval(line.dropFirst(14)) {
+                        section.markdown += "install-time: \(formatter.string(from: Date(timeIntervalSince1970: epoch)))\n"
+                    } else {
+                        section.markdown += "\(line)\n"
+                    }
+                }
                 section.markdown += "\n"
             }
             section.markdown += "```\n\n"
@@ -380,7 +389,10 @@ struct InstallInspector {
     func unifiedLogSection() -> Section {
         var section = Section(markdown: "# System Log (last hour, mentions of \(config.pluginName))\n\n")
         let name = config.pluginName.replacingOccurrences(of: "\"", with: "")
-        let predicate = "eventMessage CONTAINS[c] \"\(name)\" OR process CONTAINS[c] \"\(name)\" OR senderImagePath CONTAINS[c] \"\(name)\""
+        // The diagnostics app's own name contains the product's, so its own
+        // housekeeping would otherwise fill this section.
+        let own = ProcessInfo.processInfo.processName.replacingOccurrences(of: "\"", with: "")
+        let predicate = "(eventMessage CONTAINS[c] \"\(name)\" OR process CONTAINS[c] \"\(name)\" OR senderImagePath CONTAINS[c] \"\(name)\") AND NOT process == \"\(own)\""
         let result = run("/usr/bin/log", ["show", "--last", "1h", "--style", "compact", "--info", "--predicate", predicate], 90)
         if result.timedOut {
             section.markdown += "_Timed out reading the system log._\n"
@@ -388,8 +400,14 @@ struct InstallInspector {
         }
         let lines = result.output.split(separator: "\n").map(String.init).filter { !$0.hasPrefix("Timestamp") }
         section.attachments["system_log_\(config.pluginName).txt"] = lines.suffix(5000).joined(separator: "\n")
-        let notable = lines.filter { $0.range(of: "error|fail|denied|crash|abort|not load|could not|invalid", options: [.regularExpression, .caseInsensitive]) != nil }
-        section.markdown += "\(lines.count) line(s); \(notable.count) look like errors. Last 40 of those:\n\n```\n\(notable.suffix(40).joined(separator: "\n").prefix(8000))\n```\n"
+        // Compact style tags each entry with its level after the timestamp:
+        // "E" error, "F" fault. Debug and info lines that merely contain the
+        // word "error" are not errors.
+        let notable = lines.filter { line in
+            let fields = line.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true)
+            return fields.count > 2 && (fields[2] == "E" || fields[2] == "F")
+        }
+        section.markdown += "\(lines.count) line(s); \(notable.count) logged as errors or faults. Last 40 of those:\n\n```\n\(notable.suffix(40).joined(separator: "\n").prefix(8000))\n```\n"
         return section
     }
 
@@ -432,7 +450,9 @@ struct InstallInspector {
                 outcome = .unfinished; detail = "PackageKit cancelled the install"
             } else if own.contains(where: { $0.contains("**** Summary Information ****") }) {
                 outcome = .completed
-                detail = own.first { $0.contains("-total-") }.map { String($0.dropFirst(19)).trimmingCharacters(in: .whitespaces) } ?? ""
+                detail = own.first { $0.contains("-total-") }
+                    .flatMap { $0.components(separatedBy: "-total-").last }
+                    .map { "took " + $0.trimmingCharacters(in: .whitespaces) } ?? ""
             } else {
                 outcome = .unfinished; detail = "no completion summary logged"
             }
