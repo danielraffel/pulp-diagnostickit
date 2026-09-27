@@ -82,6 +82,10 @@ BUILD_TYPE=release ./Scripts/build_app.sh
 ./build/*Diagnostics.app/Contents/MacOS/* --selftest
 ```
 
+The app ships with DiagnosticKit's own icon (`Resources/AppIcon.png`). To
+brand it for a product, set `APP_ICON_PNG` in `.env` to a 1024×1024 PNG with
+transparent corners; the build turns it into `AppIcon.icns`.
+
 `.env` is per-project instance config and is **gitignored**; `.env.example` is
 the committed template. Nothing secret lives in the repo — the GitHub PAT, if
 you use GitHub mode, stays only in your local `.env`.

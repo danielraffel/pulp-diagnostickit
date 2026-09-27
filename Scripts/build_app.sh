@@ -93,6 +93,24 @@ done
 # Copy .env into Resources
 cp ".env" "$APP_PATH/Contents/Resources/"
 
+# App icon: Resources/AppIcon.png (1024x1024, transparent corners) by default;
+# a product sets APP_ICON_PNG in .env to use its own. Relative paths resolve
+# from this checkout.
+ICON_PNG="${APP_ICON_PNG:-Resources/AppIcon.png}"
+[[ "$ICON_PNG" = /* ]] || ICON_PNG="$DIAGNOSTIC_DIR/$ICON_PNG"
+if [[ -f "$ICON_PNG" ]]; then
+    ICONSET="$BUILD_DIR/AppIcon.iconset"
+    rm -rf "$ICONSET" && mkdir -p "$ICONSET"
+    for size in 16 32 128 256 512; do
+        sips -z $size $size "$ICON_PNG" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+        sips -z $((size * 2)) $((size * 2)) "$ICON_PNG" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+    done
+    iconutil -c icns "$ICONSET" -o "$APP_PATH/Contents/Resources/AppIcon.icns"
+    rm -rf "$ICONSET"
+else
+    echo -e "${YELLOW}Warning: no app icon at $ICON_PNG; the app will use the generic icon${NC}"
+fi
+
 # Create Info.plist
 cat > "$APP_PATH/Contents/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
