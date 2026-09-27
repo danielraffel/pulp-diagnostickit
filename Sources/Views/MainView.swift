@@ -275,6 +275,17 @@ struct MainView: View {
 
             Spacer()
 
+            if !viewModel.config.supportEmail.isEmpty {
+                Button {
+                    emailToSupport(path: path)
+                } label: {
+                    Label("Email to Support", systemImage: "envelope")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
+
             HStack {
                 ShareLink(item: URL(fileURLWithPath: path)) {
                     Label("Share…", systemImage: "square.and.arrow.up")
@@ -294,6 +305,35 @@ struct MainView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// A new message to the support address with the archive attached, in the
+    /// user's mail app. `mailto:` cannot carry an attachment, so this goes
+    /// through the system compose-email service; when no mail app can take it,
+    /// it falls back to a `mailto:` draft that asks for the file and shows the
+    /// file in Finder to drag in.
+    private func emailToSupport(path: String) {
+        let archive = URL(fileURLWithPath: path)
+        let subject = archive.deletingPathExtension().lastPathComponent
+        let product = viewModel.config.productName
+        let body = "Hi,\n\nHere is my \(product) diagnostics report (attached).\n\n"
+        if let service = NSSharingService(named: .composeEmail) {
+            service.recipients = [viewModel.config.supportEmail]
+            service.subject = subject
+            if service.canPerform(withItems: [body, archive]) {
+                service.perform(withItems: [body, archive])
+                return
+            }
+        }
+        var components = URLComponents()
+        components.scheme = "mailto"
+        components.path = viewModel.config.supportEmail
+        components.queryItems = [
+            URLQueryItem(name: "subject", value: subject),
+            URLQueryItem(name: "body", value: body + "Please attach \(archive.lastPathComponent) from your Desktop.\n")
+        ]
+        if let url = components.url { NSWorkspace.shared.open(url) }
+        NSWorkspace.shared.activateFileViewerSelecting([archive])
     }
 
     private func errorView(message: String) -> some View {
