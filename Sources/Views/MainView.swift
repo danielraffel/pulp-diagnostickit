@@ -115,7 +115,7 @@ struct MainView: View {
                 Label("Privacy Notice", systemImage: "lock.shield")
                     .font(.headline)
 
-                Text("This diagnostic report will include:")
+                Text("This diagnostic report includes information such as:")
                     .font(.subheadline)
 
                 VStack(alignment: .leading, spacing: 4) {
