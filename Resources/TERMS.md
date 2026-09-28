@@ -1,5 +1,7 @@
 **Diagnostic Data Terms — {{PRODUCT}} Diagnostics**
 
+By clicking “Send Report”, you agree to these terms and consent to the report being sent to {{PRODUCT}} support.
+
 **What is collected**
 When you choose to send a diagnostic report, it may include information such as the following. The report is limited to technical information about your Mac, your music software and {{PRODUCT}}; the exact contents can change between versions of this app, and you can always see what a report contains before sending it:
 • System information: macOS version, processor architecture, Mac model, memory, graphics and Metal support, displays
@@ -15,11 +17,11 @@ When you choose to send a diagnostic report, it may include information such as 
 • Anything you type in the description box
 
 **How it is handled**
-• Nothing is sent unless you choose to send it.
+• Nothing is sent until you click “Send Report”.
 • Before sending, the app tries to remove your account name, full name, computer name and home folder from the report. This is done on a best-effort basis: crash reports and logs may still contain file paths or other details about your system.
 • The report is sent over an encrypted connection and delivered to {{PRODUCT}} support by email. It is used only to troubleshoot and improve {{PRODUCT}}.
 • No audio, project files or personal documents are collected.
 • A copy of the report is saved on your Desktop so you can see exactly what was sent. You can delete it at any time.
 • To ask for a report to be deleted, contact {{SUPPORT}} and quote its reference.
 
-By sending a report you consent to the collection and transmission of technical information of the kinds described above, for these purposes.
+Clicking “Send Report” is your consent to sending technical information of the kinds described above, for these purposes.

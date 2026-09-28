@@ -93,7 +93,7 @@ struct MainView: View {
             }
 
             if viewModel.config.outputMode == .send && autoSend {
-                consentLine()
+                consentLine(buttonTitle: "Send Report")
             }
 
             Button(action: {
@@ -155,17 +155,17 @@ struct MainView: View {
 
     private var idleButtonTitle: String {
         switch viewModel.config.outputMode {
-        case .send: return autoSend ? "Collect & Send to Support" : "Collect Report"
+        case .send: return autoSend ? "Send Report" : "Collect Report"
         case .github: return "Collect & Submit Diagnostic"
         case .localArchive: return "Collect & Save Diagnostic"
         }
     }
 
-    /// "By sending, you agree to the Diagnostic Data Terms." -- one line, and
-    /// it names no button, so it stays true whichever send button is shown.
-    private func consentLine() -> some View {
+    /// "By clicking “Send Report”, you agree to the Diagnostic Data Terms." --
+    /// names the exact button that sends, on one line.
+    private func consentLine(buttonTitle: String) -> some View {
         HStack(spacing: 3) {
-            Text("By sending, you agree to the")
+            Text("By clicking “\(buttonTitle)”, you agree to the")
                 .foregroundColor(.secondary)
             Button("Diagnostic Data Terms") {
                 if let url = URL(string: viewModel.config.termsURL), !viewModel.config.termsURL.isEmpty {
@@ -297,7 +297,7 @@ struct MainView: View {
 
             Spacer()
 
-            consentLine()
+            consentLine(buttonTitle: "Send Report")
 
             HStack {
                 Button("Open Report") { viewModel.openReport() }
@@ -306,7 +306,7 @@ struct MainView: View {
                 Button {
                     viewModel.retrySend(path: path)
                 } label: {
-                    Label("Send to Support", systemImage: "paperplane.fill")
+                    Label("Send Report", systemImage: "paperplane.fill")
                 }
                 .buttonStyle(.borderedProminent)
             }
