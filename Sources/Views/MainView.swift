@@ -271,6 +271,28 @@ struct MainView: View {
                 }
                 .onDrag {
                     NSItemProvider(contentsOf: URL(fileURLWithPath: path)) ?? NSItemProvider()
+                } preview: {
+                    // What Finder shows when a file is dragged: its icon over
+                    // its name, on a solid background -- not a see-through
+                    // snapshot of this panel.
+                    VStack(spacing: 4) {
+                        Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+                            .resizable()
+                            .frame(width: 48, height: 48)
+                        Text((path as NSString).lastPathComponent)
+                            .font(.caption)
+                            .lineLimit(1)
+                            .foregroundColor(.primary)
+                    }
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(nsColor: .windowBackgroundColor))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                    )
                 }
                 .help("Drag to Mail or Messages to share")
 
