@@ -3,9 +3,12 @@ import SwiftUI
 struct MainView: View {
     @StateObject private var viewModel: DiagnosticViewModel
     @State private var userFeedback = ""
+    @State private var autoSend: Bool
+    @State private var showingTerms = false
 
     init(config: AppConfig) {
         _viewModel = StateObject(wrappedValue: DiagnosticViewModel(config: config))
+        _autoSend = State(initialValue: config.autoSendDefault)
     }
 
     var body: some View {
@@ -28,6 +31,8 @@ struct MainView: View {
                     archivingView
                 case .sending:
                     sendingView
+                case .readyToSend(let path):
+                    readyToSendView(path: path)
                 case .sent(let reference, let path):
                     sentView(reference: reference, path: path)
                 case .sendFailed(let message, let path):
@@ -63,9 +68,8 @@ struct MainView: View {
     private var idleView: some View {
         VStack(spacing: 20) {
             Image(systemName: "stethoscope")
-                .font(.system(size: 60))
+                .font(.system(size: 40))
                 .foregroundColor(.accentColor)
-                .padding(.bottom, 10)
 
             if viewModel.config.showPrivacyNotice {
                 privacyNotice
@@ -77,8 +81,23 @@ struct MainView: View {
 
             Spacer()
 
+            if viewModel.config.outputMode != .localArchive {
+                VStack(alignment: .leading, spacing: 2) {
+                    Toggle("Send automatically when ready", isOn: $autoSend)
+                    Text("Uncheck to review the report before anything is sent.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.leading, 20)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if viewModel.config.outputMode == .send && autoSend {
+                consentLine()
+            }
+
             Button(action: {
-                viewModel.start(userFeedback: userFeedback)
+                viewModel.start(userFeedback: userFeedback, autoSend: autoSend)
             }) {
                 Label(idleButtonTitle, systemImage: viewModel.config.outputMode == .localArchive ? "archivebox.fill" : "paperplane.fill")
                     .frame(maxWidth: .infinity)
@@ -100,14 +119,15 @@ struct MainView: View {
                     .font(.subheadline)
 
                 VStack(alignment: .leading, spacing: 4) {
-                    bulletPoint("System information (macOS version, hardware)")
-                    bulletPoint("Plugin installation status")
-                    bulletPoint("Recent crash logs (if any)")
-                    bulletPoint("Audio Unit validation results")
+                    bulletPoint("Your Mac's model, macOS version, graphics and audio devices")
+                    bulletPoint("Where \(viewModel.config.productName) is installed and whether it loads")
+                    bulletPoint("Which music apps are installed and their plug-in settings")
+                    bulletPoint("Recent crash reports and log lines that mention \(viewModel.config.productName)")
                 }
                 .font(.caption)
 
-                Text("No personal data is collected beyond what's needed for support.")
+                Text("We do our best to remove your name, user folder and computer name, but can't guarantee every instance is caught.")
+                    .fixedSize(horizontal: false, vertical: true)
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.top, 4)
@@ -135,10 +155,69 @@ struct MainView: View {
 
     private var idleButtonTitle: String {
         switch viewModel.config.outputMode {
-        case .send: return "Collect & Send to Support"
+        case .send: return autoSend ? "Collect & Send to Support" : "Collect Report"
         case .github: return "Collect & Submit Diagnostic"
         case .localArchive: return "Collect & Save Diagnostic"
         }
+    }
+
+    /// "By sending, you agree to the Diagnostic Data Terms." -- one line, and
+    /// it names no button, so it stays true whichever send button is shown.
+    private func consentLine() -> some View {
+        HStack(spacing: 3) {
+            Text("By sending, you agree to the")
+                .foregroundColor(.secondary)
+            Button("Diagnostic Data Terms") {
+                if let url = URL(string: viewModel.config.termsURL), !viewModel.config.termsURL.isEmpty {
+                    NSWorkspace.shared.open(url)
+                } else {
+                    showingTerms = true
+                }
+            }
+            .buttonStyle(.link)
+        }
+        .font(.caption)
+        .fixedSize()
+        .frame(maxWidth: .infinity)
+        .sheet(isPresented: $showingTerms) { termsSheet }
+    }
+
+    /// The terms with their inline Markdown (bold headings) rendered and
+    /// line breaks kept as written.
+    private var termsAttributed: AttributedString {
+        let text = viewModel.config.termsText.isEmpty ? "Terms are not available in this build." : viewModel.config.termsText
+        return (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(text)
+    }
+
+    private var termsSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // The support address inside the terms is a link, and the sheet
+            // scrolls to its first link on open; start at the top instead.
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(termsAttributed)
+                        .font(.callout)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.trailing, 8)
+                        .id("terms-top")
+                }
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        proxy.scrollTo("terms-top", anchor: .top)
+                    }
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Close") { showingTerms = false }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding()
+        .frame(width: CGFloat(viewModel.config.windowWidth) - 20,
+               height: CGFloat(viewModel.config.windowHeight) - 60)
     }
 
     private var cancelButton: some View {
@@ -193,6 +272,43 @@ struct MainView: View {
 
                 Button("Done") { NSApplication.shared.terminate(nil) }
                     .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func readyToSendView(path: String) -> some View {
+        VStack(spacing: 20) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 56))
+                .foregroundColor(.accentColor)
+
+            Text("Ready to send")
+                .font(.headline)
+
+            Text("Nothing has been sent yet. Open the report to see exactly what support will receive.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            archiveBox(path: path, caption: "Saved on your Desktop. Closing this window sends nothing.")
+
+            Spacer()
+
+            consentLine()
+
+            HStack {
+                Button("Open Report") { viewModel.openReport() }
+                    .buttonStyle(.bordered)
+
+                Button {
+                    viewModel.retrySend(path: path)
+                } label: {
+                    Label("Send to Support", systemImage: "paperplane.fill")
+                }
+                .buttonStyle(.borderedProminent)
             }
         }
         .padding()
@@ -505,6 +621,7 @@ class DiagnosticViewModel: ObservableObject {
         case submitting
         case archiving
         case sending
+        case readyToSend(path: String)
         case sent(reference: String, path: String)
         case sendFailed(message: String, path: String)
         case success(String)
@@ -527,6 +644,8 @@ class DiagnosticViewModel: ObservableObject {
     /// for Try Again.
     private var pendingSummary = Data()
     private var pendingNote = ""
+    /// The report text exactly as it is in the archive, for Open Report.
+    private var pendingReport = ""
 
     init(config: AppConfig) {
         self.config = config
@@ -539,15 +658,28 @@ class DiagnosticViewModel: ObservableObject {
            FileManager.default.fileExists(atPath: archive) {
             switch ProcessInfo.processInfo.environment["DIAGNOSTICKIT_PREVIEW_STATE"] {
             case "sent": state = .sent(reference: "AB12CD34", path: archive)
+            case "review": state = .readyToSend(path: archive)
             case "failed": state = .sendFailed(message: SupportSender.userMessage(for: URLError(.notConnectedToInternet)), path: archive)
             default: state = .successLocal(archive)
             }
         }
     }
 
-    func start(userFeedback: String) {
+    func start(userFeedback: String, autoSend: Bool = true) {
         work?.cancel()
-        work = Task { await collectAndSubmit(userFeedback: userFeedback) }
+        work = Task { await collectAndSubmit(userFeedback: userFeedback, autoSend: autoSend) }
+    }
+
+    /// Opens the report (the same text that is in the archive) in the user's
+    /// default app for Markdown or plain text.
+    func openReport() {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(config.productName)-diagnostic-report.md")
+        try? pendingReport.write(to: url, atomically: true, encoding: .utf8)
+        if !NSWorkspace.shared.open(url) {
+            NSWorkspace.shared.open([url], withApplicationAt: URL(fileURLWithPath: "/System/Applications/TextEdit.app"),
+                                    configuration: NSWorkspace.OpenConfiguration())
+        }
     }
 
     /// Back to the start screen. Collection tools already running finish in
@@ -579,7 +711,7 @@ class DiagnosticViewModel: ObservableObject {
         }
     }
 
-    func collectAndSubmit(userFeedback: String) async {
+    func collectAndSubmit(userFeedback: String, autoSend: Bool = true) async {
         // Collect phase
         state = .collecting
         statusMessage = "Gathering system information..."
@@ -599,7 +731,14 @@ class DiagnosticViewModel: ObservableObject {
                 pendingSummary = Data(anonymizeDiagnosticText(String(decoding: diagnosticData.summaryJSON, as: UTF8.self),
                                                               enabled: anonymize).utf8)
                 pendingNote = anonymizeDiagnosticText(lastFeedback, enabled: anonymize)
-                await send(archive: archiveURL)
+                pendingReport = anonymizeDiagnosticText(
+                    renderDiagnosticReport(diagnosticData, appName: config.appName, appVersion: config.appVersion),
+                    enabled: anonymize)
+                if autoSend {
+                    await send(archive: archiveURL)
+                } else {
+                    state = .readyToSend(path: archiveURL.path)
+                }
 
             case .github:
                 state = .submitting

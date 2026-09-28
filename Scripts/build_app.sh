@@ -105,6 +105,16 @@ set_bundle_env() {
 if [[ -n "${DIAGNOSTICKIT_SEND_ENDPOINT:-}" ]]; then set_bundle_env SEND_ENDPOINT "$DIAGNOSTICKIT_SEND_ENDPOINT"; fi
 if [[ -n "${DIAGNOSTICKIT_SEND_KEY:-}" ]]; then set_bundle_env SEND_KEY "$DIAGNOSTICKIT_SEND_KEY"; fi
 
+# Diagnostic data terms shown before sending: DiagnosticKit's default
+# Resources/TERMS.md, or the product's own via TERMS_FILE in .env.
+TERMS_SRC="${TERMS_FILE:-Resources/TERMS.md}"
+[[ "$TERMS_SRC" = /* ]] || TERMS_SRC="$DIAGNOSTIC_DIR/$TERMS_SRC"
+if [[ -f "$TERMS_SRC" ]]; then
+    cp "$TERMS_SRC" "$APP_PATH/Contents/Resources/TERMS.md"
+else
+    echo -e "${YELLOW}Warning: no terms at $TERMS_SRC; the terms link will say so${NC}"
+fi
+
 # App icon: Resources/AppIcon.png (1024x1024, transparent corners) by default;
 # a product sets APP_ICON_PNG in .env to use its own. Relative paths resolve
 # from this checkout.
