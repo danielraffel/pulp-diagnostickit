@@ -320,10 +320,13 @@ struct MainView: View {
                 }
                 .buttonStyle(.bordered)
 
+                // Only one primary action on this screen: Email to Support when
+                // a support address is configured, otherwise Reveal in Finder.
                 Button("Reveal in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
+                .modifier(ProminentIf(viewModel.config.supportEmail.isEmpty))
 
                 Button("Done") {
                     NSApplication.shared.terminate(nil)
@@ -506,5 +509,14 @@ class DiagnosticViewModel: ObservableObject {
     func reset() {
         state = .idle
         statusMessage = ""
+    }
+}
+
+/// `.borderedProminent` when `on`, otherwise leaves the button as it is.
+private struct ProminentIf: ViewModifier {
+    let on: Bool
+    init(_ on: Bool) { self.on = on }
+    func body(content: Content) -> some View {
+        if on { content.buttonStyle(.borderedProminent) } else { content }
     }
 }
