@@ -9,6 +9,7 @@
 
 import { EmailMessage } from "cloudflare:email";
 import { buildReportEmail } from "./mime";
+import { looksLikeReport } from "./validate";
 
 export interface Env {
   SEND: { send(message: EmailMessage): Promise<void> };
@@ -49,6 +50,11 @@ export default {
     if (!(archive instanceof File) || archive.size === 0) return json(400, { error: "missing archive" });
     if (archive.size > max) return json(413, { error: "report too large" });
 
+    const bytes = new Uint8Array(await archive.arrayBuffer());
+    const summary = String(form.get("summary") ?? "");
+    const invalid = looksLikeReport(bytes, summary);
+    if (invalid) return json(400, { error: `not a diagnostics report: ${invalid}` });
+
     const reference = crypto.randomUUID().slice(0, 8).toUpperCase();
     const raw = buildReportEmail({
       subjectPrefix: env.SUBJECT_PREFIX ?? "[DiagnosticKit]",
@@ -56,10 +62,10 @@ export default {
       to: env.TO,
       reference,
       product: String(form.get("product") ?? "Product").replace(/[^\p{L}\p{N} ._-]/gu, "").slice(0, 60) || "Product",
-      summary: String(form.get("summary") ?? "{}"),
+      summary,
       note: String(form.get("note") ?? ""),
       archiveName: archive.name || `${reference}.zip`,
-      archive: new Uint8Array(await archive.arrayBuffer()),
+      archive: bytes,
     });
     try {
       await env.SEND.send(new EmailMessage(env.FROM, env.TO, raw));

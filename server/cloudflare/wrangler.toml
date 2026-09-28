@@ -1,4 +1,6 @@
-# DiagnosticKit report intake. Deploy with `wrangler deploy` from this folder.
+# DiagnosticKit report intake -- TEMPLATE. Copy to wrangler.local.toml
+# (git-ignored), fill in your addresses, and deploy with
+#   wrangler deploy --config wrangler.local.toml
 #
 # One-time setup (see README.md): Email Routing enabled on the sending
 # domain, TO verified as a destination address, and the upload key set as a
@@ -8,15 +10,15 @@ main = "src/index.ts"
 compatibility_date = "2026-09-01"
 
 [vars]
-FROM = "diagnostics@generouscorp.com"
-TO = "daniel@generouscorp.com"
+FROM = "diagnostics@example.com"  # any address on your Email Routing domain
+TO = "you@example.com"  # a verified Email Routing destination
 MAX_BYTES = "20000000"
 # Every report's subject starts with this, for inbox filters.
 SUBJECT_PREFIX = "[DiagnosticKit]"
 
 [[send_email]]
 name = "SEND"
-destination_address = "daniel@generouscorp.com"
+destination_address = "you@example.com"
 
 # 5 reports per minute per IP is far above any real use and far below abuse.
 [[ratelimits]]

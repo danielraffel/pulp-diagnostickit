@@ -19,3 +19,7 @@ DerivedData/
 *.app
 *.dmg
 *.zip
+
+# Per-owner intake settings (addresses, account); the template is wrangler.toml
+server/cloudflare/wrangler.local.toml
+server/cloudflare/.wrangler/

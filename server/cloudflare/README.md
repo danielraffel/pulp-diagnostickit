@@ -53,7 +53,8 @@ Needs a domain on Cloudflare DNS and `wrangler` logged in (`wrangler login`).
    inbox reports should land in and click the verification link Cloudflare
    emails to it. Optionally add a routing rule so an address on your domain
    (e.g. `support@yourdomain`) forwards there too.
-2. **Configure** `wrangler.toml`:
+2. **Configure**: copy `wrangler.toml` to `wrangler.local.toml` (git-ignored,
+   so your addresses stay out of the repository) and edit the copy:
    - `FROM`: an address on the Email Routing domain (it need not exist as a
      mailbox), e.g. `diagnostics@yourdomain`.
    - `TO` and `[[send_email]] destination_address`: the verified inbox.
@@ -62,8 +63,8 @@ Needs a domain on Cloudflare DNS and `wrangler` logged in (`wrangler login`).
 3. **Deploy and set the key:**
    ```bash
    cd server/cloudflare
-   wrangler deploy
-   openssl rand -hex 24 | tee /dev/stderr | wrangler secret put UPLOAD_KEY
+   wrangler deploy --config wrangler.local.toml
+   openssl rand -hex 24 | tee /dev/stderr | wrangler secret put UPLOAD_KEY --config wrangler.local.toml
    ```
    Keep the printed key; the app needs it.
 4. **Check it:** `curl https://<name>.<account>.workers.dev/health` → `{"ok":true}`,
@@ -89,7 +90,7 @@ report and appears in the subject.
 ## Rotate the key
 
 ```bash
-openssl rand -hex 24 | tee /dev/stderr | wrangler secret put UPLOAD_KEY
+openssl rand -hex 24 | tee /dev/stderr | wrangler secret put UPLOAD_KEY --config wrangler.local.toml
 ```
 
 Builds carrying the old key then get "This build isn't allowed to send reports
@@ -98,8 +99,17 @@ any more" and keep the ZIP on the Desktop; ship a build with the new key.
 ## Tests
 
 ```bash
-node --test test/mime.test.ts
+DK_SAMPLE_ZIP=/path/to/a/Product-Diagnostics-*.zip node --test test/*.test.ts
 ```
 
 Covers the subject, body, the attachment decoding to the exact archive bytes,
-MIME line rules, and header injection through the product name.
+MIME line rules, header injection through the product name, and the report
+check.
+
+## What the intake accepts
+
+Only a DiagnosticKit report: a ZIP holding `diagnostic_report.md` and
+`findings.json`, sent with a summary carrying the `diagnostickit.findings.v1`
+schema tag. Anything else is refused with 400 before any email is built. This
+cannot prove the app sent it (anything the app sends can be copied), but it
+keeps arbitrary uploads from reaching your inbox.

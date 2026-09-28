@@ -37,6 +37,15 @@ enum DiagnosticMain {
                 let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
                 let size = (attrs?[.size] as? NSNumber)?.intValue ?? -1
                 print("SELFTEST_OK \(url.path) bytes=\(size)")
+                // --send also delivers it through the configured intake, so a
+                // build's send path can be proved end to end without the UI.
+                if CommandLine.arguments.contains("--send") {
+                    let anonymize = config.anonymizeUsernames || config.excludeUserPaths
+                    let summary = Data(anonymizeDiagnosticText(String(decoding: data.summaryJSON, as: UTF8.self), enabled: anonymize).utf8)
+                    let reference = try await SupportSender(endpoint: config.sendEndpoint, key: config.sendKey, timeout: 60)
+                        .sendWithRetry(archive: url, product: config.productName, summary: summary, note: "self-test run")
+                    print("SELFTEST_SENT reference=\(reference)")
+                }
             } catch {
                 FileHandle.standardError.write(Data("SELFTEST_FAIL \(error.localizedDescription)\n".utf8))
                 exitCode = 1

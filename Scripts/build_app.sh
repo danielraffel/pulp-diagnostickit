@@ -93,6 +93,18 @@ done
 # Copy .env into Resources
 cp ".env" "$APP_PATH/Contents/Resources/"
 
+# The intake's upload key never lives in a committed .env: when
+# DIAGNOSTICKIT_SEND_KEY (and optionally DIAGNOSTICKIT_SEND_ENDPOINT) is set in
+# the build environment, it is written into the BUNDLE's copy only.
+set_bundle_env() {
+    local key="$1" value="$2" file="$APP_PATH/Contents/Resources/.env"
+    grep -v "^${key}=" "$file" > "$file.tmp" || true
+    printf '%s="%s"\n' "$key" "$value" >> "$file.tmp"
+    mv "$file.tmp" "$file"
+}
+if [[ -n "${DIAGNOSTICKIT_SEND_ENDPOINT:-}" ]]; then set_bundle_env SEND_ENDPOINT "$DIAGNOSTICKIT_SEND_ENDPOINT"; fi
+if [[ -n "${DIAGNOSTICKIT_SEND_KEY:-}" ]]; then set_bundle_env SEND_KEY "$DIAGNOSTICKIT_SEND_KEY"; fi
+
 # App icon: Resources/AppIcon.png (1024x1024, transparent corners) by default;
 # a product sets APP_ICON_PNG in .env to use its own. Relative paths resolve
 # from this checkout.
