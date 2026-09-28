@@ -545,7 +545,9 @@ extension InstallInspector {
         let shot = workDir.appendingPathComponent("editor_render.png")
         try? fileManager.removeItem(at: shot)
         let started = Date()
-        let result = runWithEnvironment(exe, [], env: ["PULP_HEADLESS": "1", "PULP_SCREENSHOT": shot.path, "PULP_FRAMES": "60"], timeout: 90)
+        let result = runWithEnvironment(exe, [], env: ["PULP_HEADLESS": "1", "PULP_SCREENSHOT": shot.path, "PULP_FRAMES": "60",
+                                                    // Route Skia's own log records into the text log (builds that support it).
+                                                    "PULP_GPU_LOG_BRIDGE": "1"], timeout: 90)
         let seconds = Date().timeIntervalSince(started)
         let size = (try? fileManager.attributesOfItem(atPath: shot.path)[.size] as? NSNumber)?.intValue ?? 0
         let log = result.output
@@ -555,6 +557,7 @@ extension InstallInspector {
             $0.range(of: "GpuSurface|SkiaSurface|Dawn|Metal|Graphite|gpu-host|adapter|error|fail", options: [.regularExpression, .caseInsensitive]) != nil
         }
         let rendered = size > 10_000
+        section.markdown += gpuReadout(log, into: &section)
         section.markdown += "- Result: \(rendered ? "✅ editor rendered" : "❌ no editor image") in \(String(format: "%.1f", seconds)) s (exit \(result.exitCode)\(result.timedOut ? ", timed out" : ""))\n\n```\n\(gpuLines.prefix(40).joined(separator: "\n").prefix(5000))\n```\n"
         if !rendered {
             section.findings.append(Finding(severity: .problem, message:
@@ -564,6 +567,69 @@ extension InstallInspector {
                 "The editor rendered, but not through the GPU path (no Graphite start-up in the log); expect slower drawing."))
         }
         return section
+    }
+
+    /// The structured lines newer Pulp builds log at GPU start-up, read into
+    /// plain statements. Older builds do not emit them; that is reported, not
+    /// treated as a failure.
+    func gpuReadout(_ log: String, into section: inout Section) -> String {
+        let lines = log.components(separatedBy: "\n")
+        func line(_ prefix: String) -> String? {
+            lines.first { $0.contains(prefix) }.map { String($0[$0.range(of: prefix)!.upperBound...]) }
+        }
+        func fields(_ text: String) -> [String: String] {
+            var out: [String: String] = [:]
+            let pattern = try! NSRegularExpression(pattern: "([a-z_0-9]+)=(\"(?:[^\"\\\\]|\\\\.)*\"|\\S+)")
+            for m in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+                guard let k = Range(m.range(at: 1), in: text), let v = Range(m.range(at: 2), in: text) else { continue }
+                out[String(text[k])] = String(text[v]).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            }
+            return out
+        }
+        var md = ""
+        if let adapter = line("GpuSurface: adapter ").map(fields) {
+            md += "- GPU chosen: **\(adapter["name"] ?? "?")** (\(adapter["vendor"] ?? "?"), \(adapter["architecture"] ?? "?"), \(adapter["type"] ?? "?"), backend \(adapter["backend"] ?? "?"))\n"
+            if adapter["null"] == "true" {
+                section.findings.append(Finding(severity: .problem, message:
+                    "The editor ran on Dawn's null backend: no real GPU was used, so nothing it draws will appear."))
+            } else if adapter["type"] == "cpu" {
+                section.findings.append(Finding(severity: .warning, message:
+                    "No hardware GPU was available; the editor ran on a software renderer (\(adapter["name"] ?? "?")) and will be slow."))
+            }
+        } else {
+            md += "- GPU identity: _not logged by this build (needs a Pulp SDK with start-up diagnostics)_\n"
+        }
+        if let startup = line("GpuSurface: startup_ms ").map(fields) {
+            md += "- GPU start-up (ms): " + ["instance", "adapter", "device", "surface", "graphite", "first_frame"]
+                .map { "\($0) \(startup[$0] ?? "?")" }.joined(separator: ", ") + "\n"
+            if let first = Double(startup["first_frame"] ?? ""), first > 2000 {
+                section.findings.append(Finding(severity: .warning, message:
+                    String(format: "The editor took %.1f s to show its first frame on this Mac.", first / 1000)))
+            }
+        }
+        if let frames = line("Standalone: frame_ms ").map(fields) {
+            md += "- Frames: \(frames["frames"] ?? "?") drawn, p50 \(frames["p50"] ?? "?") ms, p95 \(frames["p95"] ?? "?") ms, max \(frames["max"] ?? "?") ms, \(frames["over16"] ?? "?") over 16.7 ms, \(frames["over33"] ?? "?") over 33.3 ms\n"
+            if let p95 = Double(frames["p95"] ?? ""), p95 > 33.3 {
+                section.findings.append(Finding(severity: .warning, message:
+                    "Drawing the editor took \(frames["p95"]!) ms per frame at the 95th percentile; animation will stutter on this Mac."))
+            }
+        }
+        if let bridge = line("GpuDiagnostics: ").map(fields) {
+            md += "- Skia log bridge: \(bridge["skia_bridge"] ?? "?"), \(bridge["skia_records"] ?? "0") Skia record(s), \(bridge["gpu_diagnostics_emitted"] ?? "0") GPU diagnostic(s)\n"
+        }
+        let skia = lines.filter { $0.contains("skia: [") }
+        let dawnErrors = lines.filter { $0.range(of: "uncaptured error|device lost|Device lost|validation error", options: [.regularExpression, .caseInsensitive]) != nil }
+        if !skia.isEmpty {
+            md += "\n```\n\(skia.prefix(20).joined(separator: "\n"))\n```\n"
+            if skia.contains(where: { $0.contains("[error]") || $0.contains("[fatal]") }) {
+                section.findings.append(Finding(severity: .warning, message: "Skia reported errors while drawing the editor; see editor_render_log.txt."))
+            }
+        }
+        if !dawnErrors.isEmpty {
+            section.findings.append(Finding(severity: .problem, message:
+                "Dawn reported a GPU error while drawing the editor: \(dawnErrors[0].trimmingCharacters(in: .whitespaces).prefix(200))"))
+        }
+        return md + "\n"
     }
 
     private func runWithEnvironment(_ path: String, _ args: [String], env: [String: String], timeout: Int) -> ProcessResult {

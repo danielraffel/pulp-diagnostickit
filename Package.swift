@@ -18,6 +18,11 @@ let package = Package(
             name: "DiagnosticKit",
             dependencies: [],
             path: "Sources"
+        ),
+        .testTarget(
+            name: "DiagnosticKitTests",
+            dependencies: ["DiagnosticKit"],
+            path: "Tests/DiagnosticKitTests"
         )
     ]
 )
