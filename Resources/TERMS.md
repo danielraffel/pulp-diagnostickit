@@ -1,7 +1,7 @@
 **Diagnostic Data Terms — {{PRODUCT}} Diagnostics**
 
 **What is collected**
-When you choose to send a diagnostic report, the following may be collected and sent:
+When you choose to send a diagnostic report, it may include information such as the following. The report is limited to technical information about your Mac, your music software and {{PRODUCT}}; the exact contents can change between versions of this app, and you can always see what a report contains before sending it:
 • System information: macOS version, processor architecture, Mac model, memory, graphics and Metal support, displays
 • Audio devices and their sample rate and buffer settings
 • Where {{PRODUCT}} is installed: file paths, versions, file permissions, code signing, notarization and quarantine status, and the libraries bundled with it
@@ -22,4 +22,4 @@ When you choose to send a diagnostic report, the following may be collected and 
 • A copy of the report is saved on your Desktop so you can see exactly what was sent. You can delete it at any time.
 • To ask for a report to be deleted, contact {{SUPPORT}} and quote its reference.
 
-By sending a report you consent to the collection and transmission of the information above for these purposes.
+By sending a report you consent to the collection and transmission of technical information of the kinds described above, for these purposes.
