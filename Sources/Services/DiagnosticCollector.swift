@@ -169,6 +169,7 @@ class DiagnosticCollector {
                 return ["format": bundle.format, "path": bundle.path,
                         "version": info?["CFBundleShortVersionString"] as? String ?? "?"]
             },
+            "user_feedback": userFeedback.trimmingCharacters(in: .whitespacesAndNewlines),
             "findings": findings.sorted { $0.severity < $1.severity }.map { finding -> [String: String] in
                 let level: String
                 switch finding.severity {

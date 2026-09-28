@@ -138,6 +138,12 @@ struct MainView: View {
             Text("Collecting diagnostic information...")
                 .font(.headline)
 
+            Text("This usually takes 2–4 minutes. You can leave this window open and come back.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
             Text(viewModel.statusMessage)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
@@ -316,7 +322,9 @@ struct MainView: View {
         let archive = URL(fileURLWithPath: path)
         let subject = archive.deletingPathExtension().lastPathComponent
         let product = viewModel.config.productName
+        let note = viewModel.lastFeedback
         let body = "Hi,\n\nHere is my \(product) diagnostics report (attached).\n\n"
+            + (note.isEmpty ? "" : "What happened:\n\(note)\n\n")
         if let service = NSSharingService(named: .composeEmail) {
             service.recipients = [viewModel.config.supportEmail]
             service.subject = subject
@@ -416,6 +424,9 @@ class DiagnosticViewModel: ObservableObject {
     }
 
     @Published var state: State = .idle
+    /// What the user typed in the description box, kept so Email to Support
+    /// can put it in the message body.
+    @Published var lastFeedback = ""
     @Published var statusMessage = ""
 
     let config: AppConfig
@@ -442,6 +453,7 @@ class DiagnosticViewModel: ObservableObject {
         statusMessage = "Gathering system information..."
 
         do {
+            lastFeedback = userFeedback.trimmingCharacters(in: .whitespacesAndNewlines)
             let diagnosticData = await collector.collectDiagnostics(userFeedback: userFeedback)
 
             switch config.outputMode {

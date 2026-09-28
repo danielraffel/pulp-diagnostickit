@@ -587,7 +587,9 @@ extension InstallInspector {
             return out
         }
         var md = ""
-        if let adapter = line("GpuSurface: adapter ").map(fields) {
+        // Match the identity line by its first field: 0.873-era builds also log
+        // "GpuSurface: adapter offers timestamp-query ...", which is not it.
+        if let adapter = line("GpuSurface: adapter name=").map({ fields("name=" + $0) }) {
             md += "- GPU chosen: **\(adapter["name"] ?? "?")** (\(adapter["vendor"] ?? "?"), \(adapter["architecture"] ?? "?"), \(adapter["type"] ?? "?"), backend \(adapter["backend"] ?? "?"))\n"
             if adapter["null"] == "true" {
                 section.findings.append(Finding(severity: .problem, message:

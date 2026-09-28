@@ -48,7 +48,14 @@ final class GpuReadoutTests: XCTestCase {
 
     /// A build that predates the diagnostics lines says so and invents nothing.
     func testOlderBuildWithoutLinesIsReportedNotFlagged() {
-        let old = "[pulp:info]  GpuSurface: backend_type=Metal\n[gpu-host] first frame: logical=990x645"
+        // Real lines from a Pulp 0.873 standalone, including the "adapter offers"
+        // line that shares the identity line's prefix.
+        let old = """
+        [pulp:info]  GpuSurface: created Metal surface from CAMetalLayer
+        [pulp:info]  GpuSurface: adapter offers timestamp-query but GPU timing was not requested — keeping full device validation
+        [pulp:info]  GpuSurface: backend_type=Metal
+        [gpu-host] first frame: logical=990x645 gpu=1980x1290 scale=2.0
+        """
         var section = Section(markdown: "")
         let md = inspector().gpuReadout(old, into: &section)
         XCTAssertTrue(md.contains("not logged by this build"), md)
