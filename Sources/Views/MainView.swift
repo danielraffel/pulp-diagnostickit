@@ -3,6 +3,8 @@ import SwiftUI
 struct MainView: View {
     @StateObject private var viewModel: DiagnosticViewModel
     @State private var userFeedback = ""
+    @State private var choosingEmailClient = false
+    @State private var emailHint: String?
 
     init(config: AppConfig) {
         _viewModel = StateObject(wrappedValue: DiagnosticViewModel(config: config))
@@ -291,22 +293,29 @@ struct MainView: View {
                 }
                 .help("Drag to Mail or Messages to share")
 
-                Text("Optional: drag this to Mail or Messages to share it.")
+                Text(emailHint ?? "Optional: drag this to Mail or Messages to share it.")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(emailHint == nil ? .secondary : .orange)
+                    .multilineTextAlignment(.center)
             }
 
             Spacer()
 
             if !viewModel.config.supportEmail.isEmpty {
                 Button {
-                    emailToSupport(path: path)
+                    choosingEmailClient = true
                 } label: {
                     Label("Email to Support", systemImage: "envelope")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .confirmationDialog("Send the report with", isPresented: $choosingEmailClient) {
+                    ForEach(EmailComposer.availableClients(), id: \.self) { client in
+                        Button(EmailComposer.title(client)) { emailToSupport(path: path, with: client) }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                }
             }
 
             HStack {
@@ -333,30 +342,18 @@ struct MainView: View {
     /// through the system compose-email service; when no mail app can take it,
     /// it falls back to a `mailto:` draft that asks for the file and shows the
     /// file in Finder to drag in.
-    private func emailToSupport(path: String) {
+    private func emailToSupport(path: String, with client: EmailComposer.Client) {
         let archive = URL(fileURLWithPath: path)
-        let subject = archive.deletingPathExtension().lastPathComponent
-        let product = viewModel.config.productName
         let note = viewModel.lastFeedback
-        let body = "Hi,\n\nHere is my \(product) diagnostics report (attached).\n\n"
+        let body = "Hi,\n\nHere is my \(viewModel.config.productName) diagnostics report (\(archive.lastPathComponent)).\n\n"
             + (note.isEmpty ? "" : "What happened:\n\(note)\n\n")
-        if let service = NSSharingService(named: .composeEmail) {
-            service.recipients = [viewModel.config.supportEmail]
-            service.subject = subject
-            if service.canPerform(withItems: [body, archive]) {
-                service.perform(withItems: [body, archive])
-                return
-            }
+        let composer = EmailComposer(to: viewModel.config.supportEmail,
+                                     subject: archive.deletingPathExtension().lastPathComponent,
+                                     body: body, archive: archive)
+        switch composer.send(with: client) {
+        case .attached: emailHint = nil
+        case .needsManualAttachment(let hint): emailHint = hint
         }
-        var components = URLComponents()
-        components.scheme = "mailto"
-        components.path = viewModel.config.supportEmail
-        components.queryItems = [
-            URLQueryItem(name: "subject", value: subject),
-            URLQueryItem(name: "body", value: body + "Please attach \(archive.lastPathComponent) from your Desktop.\n")
-        ]
-        if let url = components.url { NSWorkspace.shared.open(url) }
-        NSWorkspace.shared.activateFileViewerSelecting([archive])
     }
 
     private func errorView(message: String) -> some View {

@@ -9,5 +9,9 @@
 	     a Developer ID + notarized, hardened-runtime app instead. -->
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!-- Email to Support drives Microsoft Outlook (if installed) to attach the
+	     report; hardened runtime requires this for Apple Events. -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
 </dict>
 </plist>

@@ -141,6 +141,8 @@ cat > "$APP_PATH/Contents/Info.plist" << EOF
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright © $(date +%Y)</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Lets Email to Support open a new Microsoft Outlook message with the diagnostics report attached.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
 </dict>
