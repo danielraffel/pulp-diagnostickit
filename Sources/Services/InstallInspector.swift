@@ -24,6 +24,7 @@ struct Section {
     var markdown: String
     var findings: [Finding] = []
     var attachments: [String: String] = [:]
+    var files: [String: Data] = [:]
 }
 
 typealias ProcessResult = (output: String, exitCode: Int32, timedOut: Bool, error: String?)
@@ -40,7 +41,7 @@ struct InstalledBundle {
 struct InstallInspector {
     let config: AppConfig
     let run: (String, [String], Int?) -> ProcessResult
-    private let fileManager = FileManager.default
+    let fileManager = FileManager.default
 
     init(config: AppConfig, run: @escaping (String, [String], Int?) -> ProcessResult) {
         self.config = config
@@ -119,7 +120,8 @@ struct InstallInspector {
 
             let buildInfoPath = "\(bundle.path)/Contents/Resources/pulp-build-info.json"
             if let json = try? String(contentsOfFile: buildInfoPath, encoding: .utf8) {
-                section.markdown += "- Build info (`pulp-build-info.json`):\n\n```json\n\(String(json.prefix(6000)))\n```\n"
+                section.markdown += buildInfoSummary(json)
+                section.markdown += "- Full build info (`pulp-build-info.json`):\n\n```json\n\(String(json.prefix(6000)))\n```\n"
             } else {
                 section.markdown += "- Build info: _no `pulp-build-info.json` in this bundle (built before Pulp stamped one); embedded source revisions below_\n"
                 let revisions = embeddedRevisions(bundle.path)
@@ -464,6 +466,28 @@ struct InstallInspector {
         return sessions
     }
 
+    /// The lines a reader looks for first, from a `pulp.build-info.v1` record.
+    private func buildInfoSummary(_ text: String) -> String {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "" }
+        let product = json["product"] as? [String: Any] ?? [:]
+        let build = json["build"] as? [String: Any] ?? [:]
+        let pins = json["runtime_pins"] as? [String: Any] ?? [:]
+        let sdk = (pins["pulp"] as? [String: Any]) ?? (json["pulp_sdk"] as? [String: Any]) ?? [:]
+        let skia = pins["skia"] as? [String: Any] ?? [:]
+        let dawn = pins["dawn"] as? [String: Any] ?? [:]
+        let webgpu = pins["webgpu"] as? [String: Any] ?? [:]
+        func s(_ v: Any?) -> String { v.map { "\($0)" } ?? "?" }
+        var md = ""
+        md += "- Product source: `\(s(product["source_git_sha"]))`\((product["source_git_dirty"] as? Bool) == true ? " (dirty)" : "")\n"
+        md += "- Build: \(s(build["type"])), archs \(((build["archs"] as? [String]) ?? []).joined(separator: ", "))\n"
+        md += "- Pulp SDK: \(s(sdk["sdk_version"] ?? sdk["version"])) (`\(s(sdk["source_git_sha"]))`)\n"
+        md += "- Skia: \(s(skia["release"])) (`\(s(skia["commit"]))`)\n"
+        md += "- Dawn: `\(s(dawn["commit"]))`\n"
+        md += "- WebGPU runtime: \(s(webgpu["backend"])) \(s(webgpu["wgpu_native_version"]))\n"
+        return md
+    }
+
     // MARK: - Helpers
 
     private func shortVersion(_ path: String) -> String {
@@ -478,7 +502,7 @@ struct InstallInspector {
         if let data = try? Data(contentsOf: URL(fileURLWithPath: "\(path)/Contents/Resources/pulp-build-info.json")),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             let product = json["product"] as? [String: Any]
-            if let sha = (product?["git_sha"] ?? json["product_git_sha"]) as? String, !sha.isEmpty {
+            if let sha = (product?["source_git_sha"] ?? product?["git_sha"]) as? String, !sha.isEmpty, sha != "unknown" {
                 return "\(version)@\(sha.prefix(9))"
             }
         }

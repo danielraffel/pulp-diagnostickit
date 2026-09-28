@@ -68,6 +68,14 @@ final class LocalArchiveWriter {
             // Raw crash logs / model-state files carry the username + hostname in
             // their bytes and filenames; when anonymizing, ship only the scrubbed
             // report (which already includes a crash excerpt) and skip the raw copies.
+            // Binary evidence (the editor render) and the machine-readable
+            // summary; findings.json is scrubbed like every text file.
+            for (name, content) in data.files {
+                try? content.write(to: stageURL.appendingPathComponent(Self.fileSafe(name)))
+            }
+            let summary = anonymizeDiagnosticText(String(decoding: data.summaryJSON, as: UTF8.self), enabled: anonymize)
+            try? summary.write(to: stageURL.appendingPathComponent("findings.json"), atomically: true, encoding: .utf8)
+
             for (name, content) in data.attachments {
                 let text = anonymizeDiagnosticText(content, enabled: anonymize)
                 try? text.write(to: stageURL.appendingPathComponent(Self.fileSafe(name)), atomically: true, encoding: .utf8)

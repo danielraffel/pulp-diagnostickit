@@ -38,6 +38,11 @@ struct AppConfig {
 
     // Pulp specifics
     let pulpModelPath: String
+    /// Folders holding the product's own saved data, listed (not read) in the
+    /// report. Defaults to ~/Library/Application Support/<PLUGIN_NAME>.
+    let stateDirs: [String]
+    /// Run the installed standalone app headless to prove the editor renders.
+    let standaloneProbe: Bool
 
     // UI Configuration
     let windowWidth: Int
@@ -93,15 +98,17 @@ struct AppConfig {
             auSubtype: env["AU_SUBTYPE"] ?? "",
             auManufacturer: env["AU_MANUFACTURER"] ?? "",
             pulpModelPath: env["PULP_MODEL_PATH"] ?? "",
+            stateDirs: (env["STATE_DIRS"] ?? "").split(separator: ":").map(String.init).filter { !$0.isEmpty },
+            standaloneProbe: boolValue(env["STANDALONE_PROBE"], default: true),
             windowWidth: Int(env["WINDOW_WIDTH"] ?? "380") ?? 380,
             windowHeight: Int(env["WINDOW_HEIGHT"] ?? "550") ?? 550,
             showTechnicalDetails: boolValue(env["SHOW_TECHNICAL_DETAILS"], default: false),
             allowUserFeedback: boolValue(env["ALLOW_USER_FEEDBACK"], default: true),
             showPrivacyNotice: boolValue(env["SHOW_PRIVACY_NOTICE"], default: true),
             autoSendOnSuccess: boolValue(env["AUTO_SEND_ON_SUCCESS"], default: false),
-            excludeUserPaths: boolValue(env["EXCLUDE_USER_PATHS"], default: false),
+            excludeUserPaths: boolValue(env["EXCLUDE_USER_PATHS"], default: true),
             excludeSerialNumbers: boolValue(env["EXCLUDE_SERIAL_NUMBERS"], default: false),
-            anonymizeUsernames: boolValue(env["ANONYMIZE_USERNAMES"], default: false),
+            anonymizeUsernames: boolValue(env["ANONYMIZE_USERNAMES"], default: true),
             maxLogSizeMB: Int(env["MAX_LOG_SIZE_MB"] ?? "10") ?? 10,
             compressLogs: boolValue(env["COMPRESS_LOGS"], default: true),
             diagnosticTimeout: Int(env["DIAGNOSTIC_TIMEOUT"] ?? "30") ?? 30,

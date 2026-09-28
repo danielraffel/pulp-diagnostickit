@@ -28,6 +28,26 @@ When run, it collects the things that explain a "won't load":
 - **GPU / Metal** support, **crash and hang reports that mention the product**
   (including host crashes such as a DAW crashing with the plug-in loaded), and
   the last hour of **system log** lines naming it
+- **Logic Pro / GarageBand** — the usual reason a correctly installed AU does
+  not appear: the app set to *Open using Rosetta*, Audio Units switched off in
+  Settings › Plug-ins, the product missing from Logic's component cache or
+  cached at an older component version, a recorded validation result, and
+  Logic's own AU scan logs (when it last scanned, and what it said)
+- **Every DAW installed**, with version, architectures and Rosetta setting,
+  plus REAPER's and Ableton Live's plug-in scan records
+- **Load test** — each installed VST3 and CLAP is loaded in a child process
+  (`dlopen`, then the format's entry point is asked what it contains), so a
+  plug-in that cannot load, or crashes on load, is caught without a host
+- **Editor render test** — the installed standalone app is run headless: it
+  builds the same processor and editor as the plug-ins, brings up Metal, Dawn
+  and Skia, renders the editor offscreen and exits (no window, no audio
+  device). The GPU start-up log and the rendered image go in the archive
+- **Other Pulp-built plug-ins**, and any Objective-C class names they share
+  with the product (two plug-ins defining one class can run each other's code
+  inside a host)
+- The product's **saved data** folder, **folder permissions** on every plug-in
+  location, **audio devices** (channels, sample rate, buffer, defaults),
+  **microphone permission** checks, and **displays**
 - **Pulp model state** (model-backed plugins only, when `PULP_MODEL_PATH` is set)
 
 The report opens with **Likely Problems**: the conclusions drawn from all of
@@ -106,12 +126,23 @@ a selectable "Diagnostics Helper" component **if the app is present**, and
 **skips gracefully (never errors)** if it isn't — so a release that doesn't ship
 the add-on just builds without it. Set `=0` to force it off.
 
+The archive also holds `findings.json` (schema `diagnostickit.findings.v1`):
+the product, macOS version, architecture, what is installed where, and every
+finding with its severity, for automated triage.
+
+Per-product `.env` keys beyond the identifiers: `STATE_DIRS` (colon-separated
+folders to summarise; default `~/Library/Application Support/<PLUGIN_NAME>`)
+and `STANDALONE_PROBE` (`false` to skip the editor render test).
+
 ## Privacy
 
-Diagnostic collection honors `ANONYMIZE_USERNAMES` and `EXCLUDE_USER_PATHS`
-(strip the local username / home paths from the report), and in local-ZIP mode
-the user reviews and sends the output themselves — nothing is uploaded
-automatically.
+Reports are anonymized by default, on a best-effort basis with no guarantee:
+the home path, account name, full name, computer name and hostname are
+replaced with placeholders in the report, `findings.json` and every text file
+in the archive (set `ANONYMIZE_USERNAMES=false` and `EXCLUDE_USER_PATHS=false`
+to keep them). Raw crash reports are only copied in when anonymization is off.
+In local-ZIP mode the user reviews and sends the output themselves — nothing is
+uploaded automatically.
 
 ## Security notes (GitHub mode)
 

@@ -4,6 +4,9 @@ struct DiagnosticData {
     let findings: [Finding]
     let installSections: [String]
     let attachments: [String: String]
+    let files: [String: Data]
+    /// Machine-readable summary, written as findings.json next to the report.
+    let summaryJSON: Data
     let systemInfo: String
     let pluginStatus: String
     let crashLogs: String
@@ -31,6 +34,20 @@ func anonymizeDiagnosticText(_ text: String, enabled: Bool) -> String {
     }
     let hostname = ProcessInfo.processInfo.hostName
     if !hostname.isEmpty { result = result.replacingOccurrences(of: hostname, with: "<hostname>") }
+    // Best effort, no promises: the account name also turns up outside paths
+    // (reverse-DNS identifiers, log lines), and the user's full name and the
+    // computer's name ("Jo's MacBook") can appear in system output. Names
+    // shorter than 4 characters are left alone so ordinary words survive.
+    var names: [(String, String)] = []
+    if username.count >= 4 { names.append((username, "<user>")) }
+    let fullName = NSFullUserName()
+    if fullName.count >= 4 && fullName != username { names.append((fullName, "<user name>")) }
+    if let computer = Host.current().localizedName, computer.count >= 4 { names.append((computer, "<computer name>")) }
+    let shortHost = hostname.components(separatedBy: ".").first ?? ""
+    if shortHost.count >= 4 { names.append((shortHost, "<hostname>")) }
+    for (name, token) in names {
+        result = result.replacingOccurrences(of: name, with: token, options: .caseInsensitive)
+    }
     return result
 }
 
@@ -97,10 +114,23 @@ class DiagnosticCollector {
         async let installer = Task.detached { inspector.installerSection() }.value
         async let gpu = Task.detached { inspector.gpuSection() }.value
         async let systemLog = Task.detached { inspector.unifiedLogSection() }.value
+        async let hosts = Task.detached { inspector.hostCachesSection() }.value
+        async let daws = Task.detached { inspector.dawSection() }.value
+        async let microphone = Task.detached { inspector.microphoneSection() }.value
+        async let audio = Task.detached { inspector.audioSection() }.value
+        async let displays = Task.detached { inspector.displaysSection() }.value
 
         let placement = inspector.placementSection(bundles)
         let build = inspector.buildSection(bundles)
         let gatekeeper = inspector.gatekeeperSection(bundles)
+        async let logic = Task.detached { inspector.logicSection(bundles) }.value
+        async let neighbors = Task.detached { inspector.neighborsSection(bundles) }.value
+        async let loadProbe = Task.detached { inspector.loadProbeSection(bundles) }.value
+        let workDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("diagnostickit-\(UUID().uuidString)", isDirectory: true)
+        async let editorProbe = Task.detached { inspector.editorProbeSection(bundles, workDir: workDir) }.value
+        let state = inspector.stateSection()
+        let permissions = inspector.permissionsSection(bundles)
 
         let pluginResult = await plugin
         let crashResult = await crashes
@@ -110,19 +140,53 @@ class DiagnosticCollector {
         let gpuResult = await gpu
         let logResult = await systemLog
 
-        let sections = [placement, build, gatekeeper, installerResult, gpuResult, logResult]
+        var gpuAndDisplays = gpuResult
+        gpuAndDisplays.markdown += "\n" + (await displays).markdown
+        let sections = [placement, await logic, await daws, await hosts, await loadProbe, await editorProbe,
+                        build, gatekeeper, installerResult, await neighbors, state, permissions,
+                        await audio, await microphone, gpuAndDisplays, logResult]
+        try? FileManager.default.removeItem(at: workDir)
         var findings = (sections + [crashResult.section, auResult]).flatMap { $0.findings }
         if bundles.isEmpty {
             findings.insert(Finding(severity: .problem, message:
                 "\(config.pluginName) is not installed in any standard location on this Mac."), at: 0)
         }
         var attachments: [String: String] = [:]
-        for section in sections + [auResult] { attachments.merge(section.attachments) { a, _ in a } }
+        var files: [String: Data] = [:]
+        for section in sections + [auResult] {
+            attachments.merge(section.attachments) { a, _ in a }
+            files.merge(section.files) { a, _ in a }
+        }
+        let summary: [String: Any] = [
+            "schema": "diagnostickit.findings.v1",
+            "product": config.productName,
+            "diagnostics_version": config.appVersion,
+            "generated_at": ISO8601DateFormatter().string(from: Date()),
+            "macos": ProcessInfo.processInfo.operatingSystemVersionString,
+            "architecture": inspector.hostArchitecture(),
+            "installed": bundles.map { bundle -> [String: Any] in
+                let info = Bundle(path: bundle.path)?.infoDictionary
+                return ["format": bundle.format, "path": bundle.path,
+                        "version": info?["CFBundleShortVersionString"] as? String ?? "?"]
+            },
+            "findings": findings.sorted { $0.severity < $1.severity }.map { finding -> [String: String] in
+                let level: String
+                switch finding.severity {
+                case .problem: level = "problem"
+                case .warning: level = "warning"
+                case .note: level = "note"
+                }
+                return ["severity": level, "message": finding.message]
+            },
+        ]
+        let summaryJSON = (try? JSONSerialization.data(withJSONObject: summary, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])) ?? Data()
 
         return await DiagnosticData(
             findings: findings,
             installSections: sections.map { $0.markdown },
             attachments: attachments,
+            files: files,
+            summaryJSON: summaryJSON,
             systemInfo: systemInfo,
             pluginStatus: pluginResult.status,
             crashLogs: crashResult.section.markdown,
@@ -159,12 +223,6 @@ class DiagnosticCollector {
             info += "**Memory:** \(memory)\n"
         }
 
-        info += "\n## Audio Devices\n\n"
-        if let audioDevices = listAudioDevices() {
-            info += audioDevices
-        } else {
-            info += "_Could not retrieve audio device list_\n"
-        }
 
         return info
     }
@@ -320,12 +378,6 @@ class DiagnosticCollector {
         }
 
         return value
-    }
-
-    private func listAudioDevices() -> String? {
-        let result = runProcess(path: "/usr/sbin/system_profiler", arguments: ["SPAudioDataType"])
-        guard !result.timedOut, result.error == nil else { return nil }
-        return String(result.output.prefix(500))
     }
 
     private func getFileInfo(_ path: String) -> String? {
@@ -510,7 +562,10 @@ class DiagnosticCollector {
 
         readGroup.wait()
         let output = String(decoding: collected, as: UTF8.self)
-        return (output, process.terminationStatus, timedOut, nil)
+        // A child killed by a signal reports the signal number as its status;
+        // negate it so a crash can never read as an ordinary exit code.
+        let status = process.terminationReason == .uncaughtSignal ? -process.terminationStatus : process.terminationStatus
+        return (output, status, timedOut, nil)
     }
 
     private func formatProcessResult(_ result: (output: String, exitCode: Int32, timedOut: Bool, error: String?)) -> String {

@@ -9,6 +9,11 @@ import SwiftUI
 @main
 enum DiagnosticMain {
     static func main() {
+        let args = CommandLine.arguments
+        if let at = args.firstIndex(of: "--load-probe"), args.count > at + 2 {
+            setvbuf(stdout, nil, _IOLBF, 0)
+            exit(LoadProbe.run(kind: args[at + 1], bundlePath: args[at + 2]))
+        }
         if CommandLine.arguments.contains("--selftest") {
             runSelfTest()
             // runSelfTest() calls exit(), so we never fall through.
