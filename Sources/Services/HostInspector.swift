@@ -254,11 +254,22 @@ extension InstallInspector {
         }
         let mine = Set(bundles.filter { $0.format != "Standalone App" }.prefix(1)
             .flatMap { objcClasses($0.path) })
+        // Reading symbols costs seconds per binary, and a developer machine can
+        // hold a hundred Pulp-built plug-ins; an unbounded scan turned a
+        // minutes-long collection into half an hour. Scan within a budget and
+        // say how many were left unchecked.
+        let budgetEnds = Date().addingTimeInterval(neighborScanBudgetSeconds)
+        var unchecked = 0
         let rows = neighbors.map { path -> (String, [String]) in
-            (path, mine.isEmpty ? [] : Array(mine.intersection(objcClasses(path))).sorted())
+            if mine.isEmpty { return (path, []) }
+            if Date() >= budgetEnds { unchecked += 1; return (path, []) }
+            return (path, Array(mine.intersection(objcClasses(path))).sorted())
         }.sorted { ($0.1.count, $1.0) > ($1.1.count, $0.0) }
         let clashing = rows.filter { !$0.1.isEmpty }.count
         section.markdown += "\(neighbors.count) other Pulp-built plug-in bundle(s); \(clashing) share Objective-C class names with \(config.pluginName) (checked against its \(mine.count) classes).\n\n"
+        if unchecked > 0 {
+            section.markdown += "_\(unchecked) of them were not checked: the scan stops after \(Int(neighborScanBudgetSeconds)) seconds._\n\n"
+        }
         section.markdown += "| Plug-in | Version | Shared Objective-C classes |\n|---|---|---|\n"
         for (path, shared) in rows.prefix(25) {
             let version = Bundle(path: path)?.infoDictionary?["CFBundleShortVersionString"] as? String ?? "–"
@@ -271,6 +282,8 @@ extension InstallInspector {
         return section
     }
 
+    private var neighborScanBudgetSeconds: TimeInterval { 30 }
+
     private func isPulpBuilt(_ path: String) -> Bool {
         let resources = "\(path)/Contents/Resources"
         return fileManager.fileExists(atPath: "\(resources)/pulp-build-info.json")
@@ -282,7 +295,7 @@ extension InstallInspector {
         guard let exe = Bundle(path: bundlePath)?.executablePath else { return [] }
         // Shipped binaries drop the _OBJC_CLASS_$_ symbols, but every method
         // keeps a local symbol like "-[ClassName selector]", which names its class.
-        let out = run("/usr/bin/nm", ["-U", exe], 60).output
+        let out = run("/usr/bin/nm", ["-U", exe], 15).output
         var classes = Set<String>()
         for line in out.split(separator: "\n") {
             guard let open = line.range(of: "[") else { continue }
