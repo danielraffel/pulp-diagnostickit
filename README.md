@@ -70,11 +70,12 @@ non-technical user to run Terminal commands, and it's just **one** easy way to
 collect that data. It's an optional add-on; reach for it when sharing test
 builds, not as a default part of a public release.
 
-## Two output modes
+## Output modes
 
 | Mode | When | Setup |
 |------|------|-------|
-| **Local ZIP** (default) | No GitHub config present | None — drops `…-Diagnostics-<timestamp>.zip` on the Desktop, reveals it in Finder, tells the user the filename to send you |
+| **Send to support** (recommended) | `SEND_ENDPOINT` + `SEND_KEY` are set | Deploy the free Cloudflare intake in [`server/cloudflare`](server/cloudflare/README.md). One button collects and sends; the user never opens a mail app. The report arrives as an email with the ZIP attached and a filterable `[DiagnosticKit] <Product>` subject. Failures retry once, then keep the ZIP on the Desktop with Try Again |
+| **Local ZIP** (default) | No send or GitHub config present | None — drops `…-Diagnostics-<timestamp>.zip` on the Desktop, reveals it in Finder, tells the user the filename to send you |
 | **GitHub issue** | `GITHUB_REPO` + a fine-grained PAT are configured | Create a PAT with *Issues: Read/Write* scoped to one repo |
 
 ## Two implementations

@@ -2,6 +2,8 @@ import Foundation
 
 struct AppConfig {
     enum OutputMode {
+        /// Upload to the product's report intake, which emails support.
+        case send
         case github
         case localArchive
     }
@@ -10,6 +12,11 @@ struct AppConfig {
     let appName: String
     let appIdentifier: String
     let appVersion: String
+
+    // Report intake (server/cloudflare). The key is injected at packaging
+    // time, never committed.
+    let sendEndpoint: String
+    let sendKey: String
 
     // GitHub
     let githubRepo: String
@@ -50,6 +57,8 @@ struct AppConfig {
     let showTechnicalDetails: Bool
     let allowUserFeedback: Bool
     let showPrivacyNotice: Bool
+    /// Offer the system Share menu on the saved-archive screen.
+    let showShareButton: Bool
     let autoSendOnSuccess: Bool
 
     // Privacy
@@ -68,7 +77,8 @@ struct AppConfig {
     let debugMode: Bool
 
     var hasGitHubConfig: Bool { !githubRepo.isEmpty && !githubPAT.isEmpty }
-    var outputMode: OutputMode { hasGitHubConfig ? .github : .localArchive }
+    var hasSendConfig: Bool { !sendEndpoint.isEmpty && !sendKey.isEmpty }
+    var outputMode: OutputMode { hasSendConfig ? .send : hasGitHubConfig ? .github : .localArchive }
 
     static func load() -> AppConfig {
         var env: [String: String] = [:]
@@ -82,6 +92,8 @@ struct AppConfig {
             appName: env["APP_NAME"] ?? "Diagnostics",
             appIdentifier: env["APP_IDENTIFIER"] ?? "com.pulp.diagnostics",
             appVersion: env["APP_VERSION"] ?? "1.0.0",
+            sendEndpoint: env["SEND_ENDPOINT"] ?? "",
+            sendKey: env["SEND_KEY"] ?? "",
             githubRepo: env["GITHUB_REPO"] ?? "",
             githubPAT: env["GITHUB_PAT"] ?? "",
             supportEmail: env["SUPPORT_EMAIL"] ?? "",
@@ -105,6 +117,7 @@ struct AppConfig {
             showTechnicalDetails: boolValue(env["SHOW_TECHNICAL_DETAILS"], default: false),
             allowUserFeedback: boolValue(env["ALLOW_USER_FEEDBACK"], default: true),
             showPrivacyNotice: boolValue(env["SHOW_PRIVACY_NOTICE"], default: true),
+            showShareButton: boolValue(env["SHOW_SHARE_BUTTON"], default: false),
             autoSendOnSuccess: boolValue(env["AUTO_SEND_ON_SUCCESS"], default: false),
             excludeUserPaths: boolValue(env["EXCLUDE_USER_PATHS"], default: true),
             excludeSerialNumbers: boolValue(env["EXCLUDE_SERIAL_NUMBERS"], default: false),

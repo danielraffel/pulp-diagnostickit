@@ -3,8 +3,6 @@ import SwiftUI
 struct MainView: View {
     @StateObject private var viewModel: DiagnosticViewModel
     @State private var userFeedback = ""
-    @State private var choosingEmailClient = false
-    @State private var emailHint: String?
 
     init(config: AppConfig) {
         _viewModel = StateObject(wrappedValue: DiagnosticViewModel(config: config))
@@ -28,6 +26,12 @@ struct MainView: View {
                     submittingView
                 case .archiving:
                     archivingView
+                case .sending:
+                    sendingView
+                case .sent(let reference, let path):
+                    sentView(reference: reference, path: path)
+                case .sendFailed(let message, let path):
+                    sendFailedView(message: message, path: path)
                 case .success(let url):
                     successView(url: url)
                 case .successLocal(let path):
@@ -48,7 +52,7 @@ struct MainView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text(viewModel.config.outputMode == .github ? "Submit a diagnostic report to help us troubleshoot issues" : "Collect a diagnostic report to share with support")
+            Text(viewModel.config.outputMode == .localArchive ? "Collect a diagnostic report to share with support" : "Send a diagnostic report to help us troubleshoot issues")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -74,11 +78,9 @@ struct MainView: View {
             Spacer()
 
             Button(action: {
-                Task {
-                    await viewModel.collectAndSubmit(userFeedback: userFeedback)
-                }
+                viewModel.start(userFeedback: userFeedback)
             }) {
-                Label(viewModel.config.outputMode == .github ? "Collect & Submit Diagnostic" : "Collect & Save Diagnostic", systemImage: viewModel.config.outputMode == .github ? "paperplane.fill" : "archivebox.fill")
+                Label(idleButtonTitle, systemImage: viewModel.config.outputMode == .localArchive ? "archivebox.fill" : "paperplane.fill")
                     .frame(maxWidth: .infinity)
                     .padding()
             }
@@ -131,6 +133,107 @@ struct MainView: View {
         }
     }
 
+    private var idleButtonTitle: String {
+        switch viewModel.config.outputMode {
+        case .send: return "Collect & Send to Support"
+        case .github: return "Collect & Submit Diagnostic"
+        case .localArchive: return "Collect & Save Diagnostic"
+        }
+    }
+
+    private var cancelButton: some View {
+        Button("Cancel") { viewModel.cancel() }
+            .buttonStyle(.bordered)
+    }
+
+    private var sendingView: some View {
+        VStack(spacing: 20) {
+            ProgressView()
+                .scaleEffect(1.5)
+                .padding()
+
+            Text("Sending to support...")
+                .font(.headline)
+
+            Text(viewModel.statusMessage)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            cancelButton
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func sentView(reference: String, path: String) -> some View {
+        VStack(spacing: 20) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 60))
+                .foregroundColor(.green)
+
+            Text("Sent to support")
+                .font(.headline)
+
+            Text("Thanks! Your report reached support. If you get in touch about it, mention reference \(reference).")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .textSelection(.enabled)
+
+            archiveBox(path: path, caption: "A copy is saved on your Desktop.")
+
+            Spacer()
+
+            HStack {
+                Button("Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                }
+                .buttonStyle(.bordered)
+
+                Button("Done") { NSApplication.shared.terminate(nil) }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func sendFailedView(message: String, path: String) -> some View {
+        VStack(spacing: 20) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 60))
+                .foregroundColor(.orange)
+
+            Text("Couldn't send the report")
+                .font(.headline)
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            archiveBox(path: path, caption: viewModel.config.supportEmail.isEmpty
+                ? "It's saved on your Desktop. You can send it another way, or try again."
+                : "It's saved on your Desktop. You can try again, or email it to \(viewModel.config.supportEmail).")
+
+            Spacer()
+
+            HStack {
+                Button("Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                }
+                .buttonStyle(.bordered)
+
+                Button("Try Again") { viewModel.retrySend(path: path) }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private var collectingView: some View {
         VStack(spacing: 20) {
             ProgressView()
@@ -151,6 +254,8 @@ struct MainView: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
+
+            cancelButton
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -245,8 +350,32 @@ struct MainView: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
 
-            // The archive itself, draggable: drop it into Mail, Messages or a
-            // chat window to share it without going through Finder.
+            archiveBox(path: path, caption: "Optional: drag this to Mail or Messages to share it.")
+
+            Spacer()
+
+            HStack {
+                // Share is off by default: SHOW_SHARE_BUTTON=true in .env adds it.
+                if viewModel.config.showShareButton {
+                    ShareLink(item: URL(fileURLWithPath: path)) {
+                        Label("Share…", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Button("Reveal in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// The saved archive as a draggable file: drop it into Mail, Messages or
+    /// a chat window to share it without going through Finder.
+    private func archiveBox(path: String, caption: String) -> some View {
             VStack(spacing: 6) {
                 GroupBox {
                     HStack(spacing: 10) {
@@ -293,67 +422,12 @@ struct MainView: View {
                 }
                 .help("Drag to Mail or Messages to share")
 
-                Text(emailHint ?? "Optional: drag this to Mail or Messages to share it.")
+                Text(caption)
                     .font(.caption)
-                    .foregroundColor(emailHint == nil ? .secondary : .orange)
+                    .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
 
-            Spacer()
-
-            if !viewModel.config.supportEmail.isEmpty {
-                Button {
-                    choosingEmailClient = true
-                } label: {
-                    Label("Email to Support", systemImage: "envelope")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .confirmationDialog("Send the report with", isPresented: $choosingEmailClient) {
-                    ForEach(EmailComposer.availableClients(), id: \.self) { client in
-                        Button(EmailComposer.title(client)) { emailToSupport(path: path, with: client) }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                }
-            }
-
-            HStack {
-                ShareLink(item: URL(fileURLWithPath: path)) {
-                    Label("Share…", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(.bordered)
-
-                // Only one primary action on this screen: Email to Support when
-                // a support address is configured, otherwise Reveal in Finder.
-                Button("Reveal in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
-                }
-                .buttonStyle(.bordered)
-                .modifier(ProminentIf(viewModel.config.supportEmail.isEmpty))
-            }
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    /// A new message to the support address with the archive attached, in the
-    /// user's mail app. `mailto:` cannot carry an attachment, so this goes
-    /// through the system compose-email service; when no mail app can take it,
-    /// it falls back to a `mailto:` draft that asks for the file and shows the
-    /// file in Finder to drag in.
-    private func emailToSupport(path: String, with client: EmailComposer.Client) {
-        let archive = URL(fileURLWithPath: path)
-        let note = viewModel.lastFeedback
-        let body = "Hi,\n\nHere is my \(viewModel.config.productName) diagnostics report (\(archive.lastPathComponent)).\n\n"
-            + (note.isEmpty ? "" : "What happened:\n\(note)\n\n")
-        let composer = EmailComposer(to: viewModel.config.supportEmail,
-                                     subject: archive.deletingPathExtension().lastPathComponent,
-                                     body: body, archive: archive)
-        switch composer.send(with: client) {
-        case .attached: emailHint = nil
-        case .needsManualAttachment(let hint): emailHint = hint
-        }
     }
 
     private func errorView(message: String) -> some View {
@@ -430,6 +504,9 @@ class DiagnosticViewModel: ObservableObject {
         case collecting
         case submitting
         case archiving
+        case sending
+        case sent(reference: String, path: String)
+        case sendFailed(message: String, path: String)
         case success(String)
         case successLocal(String)
         case error(String)
@@ -445,6 +522,11 @@ class DiagnosticViewModel: ObservableObject {
     private let collector: DiagnosticCollector
     private let uploader: GitHubUploader
     private let archiver: LocalArchiveWriter
+    private var work: Task<Void, Never>?
+    /// The anonymized findings.json and note of the report being sent, kept
+    /// for Try Again.
+    private var pendingSummary = Data()
+    private var pendingNote = ""
 
     init(config: AppConfig) {
         self.config = config
@@ -455,7 +537,45 @@ class DiagnosticViewModel: ObservableObject {
         // that screen can be checked without a full collection run.
         if let archive = ProcessInfo.processInfo.environment["DIAGNOSTICKIT_PREVIEW_ARCHIVE"],
            FileManager.default.fileExists(atPath: archive) {
-            state = .successLocal(archive)
+            switch ProcessInfo.processInfo.environment["DIAGNOSTICKIT_PREVIEW_STATE"] {
+            case "sent": state = .sent(reference: "AB12CD34", path: archive)
+            case "failed": state = .sendFailed(message: SupportSender.userMessage(for: URLError(.notConnectedToInternet)), path: archive)
+            default: state = .successLocal(archive)
+            }
+        }
+    }
+
+    func start(userFeedback: String) {
+        work?.cancel()
+        work = Task { await collectAndSubmit(userFeedback: userFeedback) }
+    }
+
+    /// Back to the start screen. Collection tools already running finish in
+    /// the background and their result is discarded; nothing is sent.
+    func cancel() {
+        work?.cancel()
+        work = nil
+        state = .idle
+        statusMessage = ""
+    }
+
+    func retrySend(path: String) {
+        work?.cancel()
+        work = Task { await send(archive: URL(fileURLWithPath: path)) }
+    }
+
+    private func send(archive: URL) async {
+        state = .sending
+        statusMessage = "Uploading \(archive.lastPathComponent)"
+        let sender = SupportSender(endpoint: config.sendEndpoint, key: config.sendKey, timeout: 60)
+        do {
+            let reference = try await sender.sendWithRetry(archive: archive, product: config.productName,
+                                                           summary: pendingSummary, note: pendingNote)
+            guard !Task.isCancelled else { return }
+            state = .sent(reference: reference, path: archive.path)
+        } catch {
+            guard !Task.isCancelled else { return }
+            state = .sendFailed(message: SupportSender.userMessage(for: error), path: archive.path)
         }
     }
 
@@ -467,8 +587,20 @@ class DiagnosticViewModel: ObservableObject {
         do {
             lastFeedback = userFeedback.trimmingCharacters(in: .whitespacesAndNewlines)
             let diagnosticData = await collector.collectDiagnostics(userFeedback: userFeedback)
+            guard !Task.isCancelled else { return }
 
             switch config.outputMode {
+            case .send:
+                state = .archiving
+                statusMessage = "Writing ZIP archive..."
+                let archiveURL = try await archiver.writeArchive(diagnosticData)
+                guard !Task.isCancelled else { return }
+                let anonymize = config.anonymizeUsernames || config.excludeUserPaths
+                pendingSummary = Data(anonymizeDiagnosticText(String(decoding: diagnosticData.summaryJSON, as: UTF8.self),
+                                                              enabled: anonymize).utf8)
+                pendingNote = anonymizeDiagnosticText(lastFeedback, enabled: anonymize)
+                await send(archive: archiveURL)
+
             case .github:
                 state = .submitting
                 statusMessage = "Creating GitHub issue..."
@@ -496,14 +628,5 @@ class DiagnosticViewModel: ObservableObject {
     func reset() {
         state = .idle
         statusMessage = ""
-    }
-}
-
-/// `.borderedProminent` when `on`, otherwise leaves the button as it is.
-private struct ProminentIf: ViewModifier {
-    let on: Bool
-    init(_ on: Bool) { self.on = on }
-    func body(content: Content) -> some View {
-        if on { content.buttonStyle(.borderedProminent) } else { content }
     }
 }

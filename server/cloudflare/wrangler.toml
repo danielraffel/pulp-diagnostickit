@@ -1,0 +1,25 @@
+# DiagnosticKit report intake. Deploy with `wrangler deploy` from this folder.
+#
+# One-time setup (see README.md): Email Routing enabled on the sending
+# domain, TO verified as a destination address, and the upload key set as a
+# secret:  wrangler secret put UPLOAD_KEY
+name = "diagnostickit-intake"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+[vars]
+FROM = "diagnostics@generouscorp.com"
+TO = "daniel@generouscorp.com"
+MAX_BYTES = "20000000"
+# Every report's subject starts with this, for inbox filters.
+SUBJECT_PREFIX = "[DiagnosticKit]"
+
+[[send_email]]
+name = "SEND"
+destination_address = "daniel@generouscorp.com"
+
+# 5 reports per minute per IP is far above any real use and far below abuse.
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "1001"
+simple = { limit = 5, period = 60 }
