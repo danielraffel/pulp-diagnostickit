@@ -31,15 +31,19 @@ final class LocalArchiveWriter {
     func writeArchive(_ data: DiagnosticData) async throws -> URL {
         try await Task.detached(priority: .utility) { [config, fileManager] in
             let timestamp = Self.archiveTimestamp()
-            let archiveName = "PromptableAccompanistV2-Diagnostics-\(timestamp).zip"
-            let desktopURL = fileManager.homeDirectoryForCurrentUser
-                .appendingPathComponent("Desktop", isDirectory: true)
+            let product = Self.fileSafe(config.productName)
+            let archiveName = "\(product)-Diagnostics-\(timestamp).zip"
+            // DIAGNOSTICKIT_OUTPUT_DIR redirects the archive for automated
+            // runs; a user always gets it on the Desktop.
+            let desktopURL = ProcessInfo.processInfo.environment["DIAGNOSTICKIT_OUTPUT_DIR"]
+                .map { URL(fileURLWithPath: $0, isDirectory: true) }
+                ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Desktop", isDirectory: true)
             let finalURL = desktopURL.appendingPathComponent(archiveName)
             let partialURL = desktopURL.appendingPathComponent("\(archiveName).partial")
 
             let stageRoot = fileManager.temporaryDirectory
-                .appendingPathComponent("PromptableAccompanistV2-Diagnostics-\(UUID().uuidString)", isDirectory: true)
-            let stageURL = stageRoot.appendingPathComponent("PromptableAccompanistV2-Diagnostics", isDirectory: true)
+                .appendingPathComponent("\(product)-Diagnostics-\(UUID().uuidString)", isDirectory: true)
+            let stageURL = stageRoot.appendingPathComponent("\(product)-Diagnostics", isDirectory: true)
 
             do {
                 try fileManager.createDirectory(at: stageURL, withIntermediateDirectories: true)
@@ -64,6 +68,19 @@ final class LocalArchiveWriter {
             // Raw crash logs / model-state files carry the username + hostname in
             // their bytes and filenames; when anonymizing, ship only the scrubbed
             // report (which already includes a crash excerpt) and skip the raw copies.
+            // Binary evidence (the editor render) and the machine-readable
+            // summary; findings.json is scrubbed like every text file.
+            for (name, content) in data.files {
+                try? content.write(to: stageURL.appendingPathComponent(Self.fileSafe(name)))
+            }
+            let summary = anonymizeDiagnosticText(String(decoding: data.summaryJSON, as: UTF8.self), enabled: anonymize)
+            try? summary.write(to: stageURL.appendingPathComponent("findings.json"), atomically: true, encoding: .utf8)
+
+            for (name, content) in data.attachments {
+                let text = anonymizeDiagnosticText(content, enabled: anonymize)
+                try? text.write(to: stageURL.appendingPathComponent(Self.fileSafe(name)), atomically: true, encoding: .utf8)
+            }
+
             if !anonymize {
                 Self.copyBestEffort(paths: data.crashFilePaths, into: stageURL.appendingPathComponent("crash_logs", isDirectory: true), fileManager: fileManager)
                 if let pulpModelStatePath = data.pulpModelStatePath {
@@ -84,6 +101,12 @@ final class LocalArchiveWriter {
 
             return finalURL
         }.value
+    }
+
+    private static func fileSafe(_ name: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+        let cleaned = String(name.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" })
+        return cleaned.isEmpty ? "Product" : cleaned
     }
 
     private static func archiveTimestamp() -> String {

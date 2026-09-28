@@ -1,6 +1,12 @@
 import Foundation
 
 struct DiagnosticData {
+    let findings: [Finding]
+    let installSections: [String]
+    let attachments: [String: String]
+    let files: [String: Data]
+    /// Machine-readable summary, written as findings.json next to the report.
+    let summaryJSON: Data
     let systemInfo: String
     let pluginStatus: String
     let crashLogs: String
@@ -28,11 +34,36 @@ func anonymizeDiagnosticText(_ text: String, enabled: Bool) -> String {
     }
     let hostname = ProcessInfo.processInfo.hostName
     if !hostname.isEmpty { result = result.replacingOccurrences(of: hostname, with: "<hostname>") }
+    // Best effort, no promises: the account name also turns up outside paths
+    // (reverse-DNS identifiers, log lines), and the user's full name and the
+    // computer's name ("Jo's MacBook") can appear in system output. Names
+    // shorter than 4 characters are left alone so ordinary words survive.
+    var names: [(String, String)] = []
+    if username.count >= 4 { names.append((username, "<user>")) }
+    let fullName = NSFullUserName()
+    if fullName.count >= 4 && fullName != username { names.append((fullName, "<user name>")) }
+    if let computer = Host.current().localizedName, computer.count >= 4 { names.append((computer, "<computer name>")) }
+    let shortHost = hostname.components(separatedBy: ".").first ?? ""
+    if shortHost.count >= 4 { names.append((shortHost, "<hostname>")) }
+    for (name, token) in names {
+        result = result.replacingOccurrences(of: name, with: token, options: .caseInsensitive)
+    }
     return result
 }
 
 func renderDiagnosticReport(_ data: DiagnosticData, appName: String, appVersion: String) -> String {
     var body = ""
+
+    body += "# Likely Problems\n\n"
+    let ranked = data.findings.sorted { $0.severity < $1.severity }
+    if ranked.isEmpty {
+        body += "✅ Nothing found that would stop the product from loading.\n"
+    } else {
+        for finding in ranked {
+            body += "- \(finding.severity.mark) \(finding.message)\n"
+        }
+    }
+    body += "\n---\n\n"
 
     if !data.userFeedback.isEmpty {
         body += "## User Feedback\n\n"
@@ -42,12 +73,16 @@ func renderDiagnosticReport(_ data: DiagnosticData, appName: String, appVersion:
 
     body += data.systemInfo
     body += "\n\n---\n\n"
-    body += data.pluginStatus
-    body += "\n\n---\n\n"
+    for section in data.installSections {
+        body += section
+        body += "\n\n---\n\n"
+    }
     body += data.securityInfo
     body += "\n\n---\n\n"
-    body += data.pulpModelState
-    body += "\n\n---\n\n"
+    if !data.pulpModelState.isEmpty {
+        body += data.pulpModelState
+        body += "\n\n---\n\n"
+    }
     body += data.crashLogs
     body += "\n\n---\n\n"
     body += data.auValidation
@@ -66,21 +101,97 @@ class DiagnosticCollector {
     }
 
     func collectDiagnostics(userFeedback: String = "") async -> DiagnosticData {
-        async let systemInfo = collectSystemInfo()
+        let inspector = InstallInspector(config: config) { [self] path, args, timeout in
+            runProcess(path: path, arguments: args, timeout: timeout)
+        }
+        async let systemInfo = collectSystemInfo(inspector: inspector)
         async let plugin = collectPluginStatus()
-        async let crashes = collectCrashLogs()
-        async let auValidation = runAUValidation()
         async let pulpModel = collectPulpModelState()
+        async let crashes = Task.detached { inspector.crashSection() }.value
+        let bundles = inspector.installedBundles()
+        let componentInstalled = bundles.contains { $0.format == "Audio Unit" }
+        async let au = Task.detached { inspector.auRegistrationSection(componentInstalled: componentInstalled) }.value
+        async let installer = Task.detached { inspector.installerSection() }.value
+        async let gpu = Task.detached { inspector.gpuSection() }.value
+        async let systemLog = Task.detached { inspector.unifiedLogSection() }.value
+        async let hosts = Task.detached { inspector.hostCachesSection() }.value
+        async let daws = Task.detached { inspector.dawSection() }.value
+        async let microphone = Task.detached { inspector.microphoneSection() }.value
+        async let audio = Task.detached { inspector.audioSection() }.value
+        async let displays = Task.detached { inspector.displaysSection() }.value
+
+        let placement = inspector.placementSection(bundles)
+        let build = inspector.buildSection(bundles)
+        let gatekeeper = inspector.gatekeeperSection(bundles)
+        async let logic = Task.detached { inspector.logicSection(bundles) }.value
+        async let neighbors = Task.detached { inspector.neighborsSection(bundles) }.value
+        async let loadProbe = Task.detached { inspector.loadProbeSection(bundles) }.value
+        let workDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("diagnostickit-\(UUID().uuidString)", isDirectory: true)
+        async let editorProbe = Task.detached { inspector.editorProbeSection(bundles, workDir: workDir) }.value
+        let state = inspector.stateSection()
+        let permissions = inspector.permissionsSection(bundles)
 
         let pluginResult = await plugin
         let crashResult = await crashes
         let pulpModelResult = await pulpModel
+        let auResult = await au
+        let installerResult = await installer
+        let gpuResult = await gpu
+        let logResult = await systemLog
+
+        var gpuAndDisplays = gpuResult
+        gpuAndDisplays.markdown += "\n" + (await displays).markdown
+        let sections = [placement, await logic, await daws, await hosts, await loadProbe, await editorProbe,
+                        build, gatekeeper, installerResult, await neighbors, state, permissions,
+                        await audio, await microphone, gpuAndDisplays, logResult]
+        try? FileManager.default.removeItem(at: workDir)
+        var findings = (sections + [crashResult.section, auResult]).flatMap { $0.findings }
+        if bundles.isEmpty {
+            findings.insert(Finding(severity: .problem, message:
+                "\(config.pluginName) is not installed in any standard location on this Mac."), at: 0)
+        }
+        var attachments: [String: String] = [:]
+        var files: [String: Data] = [:]
+        for section in sections + [auResult] {
+            attachments.merge(section.attachments) { a, _ in a }
+            files.merge(section.files) { a, _ in a }
+        }
+        let summary: [String: Any] = [
+            "schema": "diagnostickit.findings.v1",
+            "product": config.productName,
+            "diagnostics_version": config.appVersion,
+            "generated_at": ISO8601DateFormatter().string(from: Date()),
+            "macos": ProcessInfo.processInfo.operatingSystemVersionString,
+            "architecture": inspector.hostArchitecture(),
+            "installed": bundles.map { bundle -> [String: Any] in
+                let info = Bundle(path: bundle.path)?.infoDictionary
+                return ["format": bundle.format, "path": bundle.path,
+                        "version": info?["CFBundleShortVersionString"] as? String ?? "?"]
+            },
+            "user_feedback": userFeedback.trimmingCharacters(in: .whitespacesAndNewlines),
+            "findings": findings.sorted { $0.severity < $1.severity }.map { finding -> [String: String] in
+                let level: String
+                switch finding.severity {
+                case .problem: level = "problem"
+                case .warning: level = "warning"
+                case .note: level = "note"
+                }
+                return ["severity": level, "message": finding.message]
+            },
+        ]
+        let summaryJSON = (try? JSONSerialization.data(withJSONObject: summary, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])) ?? Data()
 
         return await DiagnosticData(
+            findings: findings,
+            installSections: sections.map { $0.markdown },
+            attachments: attachments,
+            files: files,
+            summaryJSON: summaryJSON,
             systemInfo: systemInfo,
             pluginStatus: pluginResult.status,
-            crashLogs: crashResult.logs,
-            auValidation: auValidation,
+            crashLogs: crashResult.section.markdown,
+            auValidation: auResult.markdown,
             userFeedback: userFeedback,
             pulpModelState: pulpModelResult.summary,
             securityInfo: pluginResult.security,
@@ -89,11 +200,15 @@ class DiagnosticCollector {
         )
     }
 
-    private func collectSystemInfo() async -> String {
+    private func collectSystemInfo(inspector: InstallInspector) async -> String {
         var info = "# System Information\n\n"
 
         let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
         info += "**macOS Version:** \(osVersion)\n"
+        info += "**Architecture:** \(inspector.hostArchitecture())\n"
+        let rosetta = FileManager.default.fileExists(atPath: "/Library/Apple/usr/share/rosetta/rosetta")
+        info += "**Rosetta 2 installed:** \(rosetta ? "yes" : "no")\n"
+        info += "**Diagnostics run at:** \(ISO8601DateFormatter().string(from: Date()))\n"
 
         if let modelName = getSystemProfilerInfo("SPHardwareDataType", key: "Model Name") {
             info += "**Model:** \(modelName)\n"
@@ -109,12 +224,6 @@ class DiagnosticCollector {
             info += "**Memory:** \(memory)\n"
         }
 
-        info += "\n## Audio Devices\n\n"
-        if let audioDevices = listAudioDevices() {
-            info += audioDevices
-        } else {
-            info += "_Could not retrieve audio device list_\n"
-        }
 
         return info
     }
@@ -215,6 +324,9 @@ class DiagnosticCollector {
     }
 
     private func collectPulpModelState() async -> (summary: String, modelStatePath: String?) {
+        // Only model-backed products configure a model path; for the rest the
+        // section would report an irrelevant absence.
+        guard !config.pulpModelPath.isEmpty else { return ("", nil) }
         let basePath = expandTilde(config.pulpModelPath)
         let modelStatePath = "\(basePath)/model-state.json"
         let modelsPath = "\(basePath)/models"
@@ -253,76 +365,6 @@ class DiagnosticCollector {
         return (summary, foundStatePath)
     }
 
-    private func collectCrashLogs() async -> (logs: String, paths: [String]) {
-        var logs = "# Recent Crash Logs\n\n"
-        let crashReportsPath = "\(fileManager.homeDirectoryForCurrentUser.path)/Library/Logs/DiagnosticReports"
-
-        guard let files = try? fileManager.contentsOfDirectory(atPath: crashReportsPath) else {
-            return (logs + "_No crash logs found_\n", [])
-        }
-
-        let weekAgo = Date().addingTimeInterval(-7 * 24 * 60 * 60)
-        let relevantLogs = files.filter { filename in
-            filename.contains(config.pluginName) && (filename.hasSuffix(".crash") || filename.hasSuffix(".ips"))
-        }.compactMap { filename -> (String, String, Date)? in
-            let fullPath = "\(crashReportsPath)/\(filename)"
-            guard let attrs = try? fileManager.attributesOfItem(atPath: fullPath),
-                  let modDate = attrs[.modificationDate] as? Date,
-                  modDate > weekAgo else {
-                return nil
-            }
-            return (filename, fullPath, modDate)
-        }.sorted { $0.2 > $1.2 }
-
-        if relevantLogs.isEmpty {
-            logs += "_No recent crash logs found for \(config.pluginName)_\n"
-            return (logs, [])
-        }
-
-        logs += "Found \(relevantLogs.count) crash log(s) from the last 7 days:\n\n"
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-
-        for (filename, _, date) in relevantLogs.prefix(5) {
-            logs += "- `\(filename)` (\(formatter.string(from: date)))\n"
-        }
-
-        if let mostRecent = relevantLogs.first,
-           let content = try? String(contentsOfFile: mostRecent.1, encoding: .utf8) {
-            logs += "\n## Most Recent Crash\n\n"
-            logs += "```\n"
-            logs += String(content.prefix(2000))
-            if content.count > 2000 {
-                logs += "\n... (truncated)\n"
-            }
-            logs += "```\n"
-        }
-
-        return (logs, relevantLogs.prefix(5).map { $0.1 })
-    }
-
-    private func runAUValidation() async -> String {
-        guard config.checkAU else {
-            return "# AU Validation\n\n_Skipped (AU validation not enabled)_\n"
-        }
-
-        var validation = "# AU Validation\n\n"
-        let result = runProcess(path: "/usr/bin/auval", arguments: ["-v", config.auType, config.auSubtype, config.auManufacturer])
-
-        if result.timedOut {
-            validation += "_AU Validation timed out after \(config.diagnosticTimeout) seconds_\n"
-        } else if let error = result.error {
-            validation += "_Could not run auval: \(error)_\n"
-        } else {
-            validation += "```\n"
-            validation += String(result.output.suffix(1500))
-            validation += "\n```\n"
-        }
-
-        return validation
-    }
-
     // MARK: - Helper Functions
 
     private func getSystemProfilerInfo(_ dataType: String, key: String) -> String? {
@@ -337,12 +379,6 @@ class DiagnosticCollector {
         }
 
         return value
-    }
-
-    private func listAudioDevices() -> String? {
-        let result = runProcess(path: "/usr/sbin/system_profiler", arguments: ["SPAudioDataType"])
-        guard !result.timedOut, result.error == nil else { return nil }
-        return String(result.output.prefix(500))
     }
 
     private func getFileInfo(_ path: String) -> String? {
@@ -485,7 +521,7 @@ class DiagnosticCollector {
         return path.replacingOccurrences(of: "~", with: fileManager.homeDirectoryForCurrentUser.path, options: .anchored)
     }
 
-    private func runProcess(path: String, arguments: [String]) -> (output: String, exitCode: Int32, timedOut: Bool, error: String?) {
+    func runProcess(path: String, arguments: [String], timeout: Int? = nil) -> (output: String, exitCode: Int32, timedOut: Bool, error: String?) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
@@ -500,7 +536,18 @@ class DiagnosticCollector {
             return ("", -1, false, error.localizedDescription)
         }
 
-        let deadline = DispatchTime.now() + .seconds(config.diagnosticTimeout)
+        // Drain the pipe while the process runs: a child that writes more than
+        // the pipe buffer (auval, log show) would otherwise block forever.
+        var collected = Data()
+        let readQueue = DispatchQueue(label: "diagnostickit.pipe")
+        let readGroup = DispatchGroup()
+        readGroup.enter()
+        readQueue.async {
+            collected = pipe.fileHandleForReading.readDataToEndOfFile()
+            readGroup.leave()
+        }
+
+        let deadline = DispatchTime.now() + .seconds(timeout ?? config.diagnosticTimeout)
         let group = DispatchGroup()
         group.enter()
         DispatchQueue.global(qos: .utility).async {
@@ -514,9 +561,12 @@ class DiagnosticCollector {
             process.waitUntilExit()
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
-        return (output, process.terminationStatus, timedOut, nil)
+        readGroup.wait()
+        let output = String(decoding: collected, as: UTF8.self)
+        // A child killed by a signal reports the signal number as its status;
+        // negate it so a crash can never read as an ordinary exit code.
+        let status = process.terminationReason == .uncaughtSignal ? -process.terminationStatus : process.terminationStatus
+        return (output, status, timedOut, nil)
     }
 
     private func formatProcessResult(_ result: (output: String, exitCode: Int32, timedOut: Bool, error: String?)) -> String {

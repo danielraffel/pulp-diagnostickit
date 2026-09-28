@@ -76,8 +76,62 @@ mkdir -p "$APP_PATH/Contents/Resources"
 cp "$BINARY_PATH" "$APP_PATH/Contents/MacOS/$APP_NAME"
 chmod +x "$APP_PATH/Contents/MacOS/$APP_NAME"
 
+# SwiftPM records absolute LC_RPATHs into the build machine's toolchain
+# (/usr/lib/swift and the Xcode swift-X.Y/macosx directory). The app links no
+# @rpath library -- the Swift runtime and frameworks resolve by absolute OS
+# paths -- so these entries only point at this machine, and an installer's
+# relocatability check rightly rejects them. Refuse to ship if a real @rpath
+# dependency ever appears, rather than stripping something it needs.
+if otool -L "$APP_PATH/Contents/MacOS/$APP_NAME" | tail -n +2 | grep -q "@rpath/"; then
+    echo -e "${RED}Error: the binary links an @rpath library; its rpaths cannot be stripped${NC}"
+    exit 1
+fi
+otool -l "$APP_PATH/Contents/MacOS/$APP_NAME" | awk '/cmd LC_RPATH/{getline; getline; print $2}' | while read -r rpath; do
+    install_name_tool -delete_rpath "$rpath" "$APP_PATH/Contents/MacOS/$APP_NAME"
+done
+
 # Copy .env into Resources
 cp ".env" "$APP_PATH/Contents/Resources/"
+
+# The intake's upload key never lives in a committed .env: when
+# DIAGNOSTICKIT_SEND_KEY (and optionally DIAGNOSTICKIT_SEND_ENDPOINT) is set in
+# the build environment, it is written into the BUNDLE's copy only.
+set_bundle_env() {
+    local key="$1" value="$2" file="$APP_PATH/Contents/Resources/.env"
+    grep -v "^${key}=" "$file" > "$file.tmp" || true
+    printf '%s="%s"\n' "$key" "$value" >> "$file.tmp"
+    mv "$file.tmp" "$file"
+}
+if [[ -n "${DIAGNOSTICKIT_SEND_ENDPOINT:-}" ]]; then set_bundle_env SEND_ENDPOINT "$DIAGNOSTICKIT_SEND_ENDPOINT"; fi
+if [[ -n "${DIAGNOSTICKIT_SEND_KEY:-}" ]]; then set_bundle_env SEND_KEY "$DIAGNOSTICKIT_SEND_KEY"; fi
+
+# Diagnostic data terms shown before sending: DiagnosticKit's default
+# Resources/TERMS.md, or the product's own via TERMS_FILE in .env.
+TERMS_SRC="${TERMS_FILE:-Resources/TERMS.md}"
+[[ "$TERMS_SRC" = /* ]] || TERMS_SRC="$DIAGNOSTIC_DIR/$TERMS_SRC"
+if [[ -f "$TERMS_SRC" ]]; then
+    cp "$TERMS_SRC" "$APP_PATH/Contents/Resources/TERMS.md"
+else
+    echo -e "${YELLOW}Warning: no terms at $TERMS_SRC; the terms link will say so${NC}"
+fi
+
+# App icon: Resources/AppIcon.png (1024x1024, transparent corners) by default;
+# a product sets APP_ICON_PNG in .env to use its own. Relative paths resolve
+# from this checkout.
+ICON_PNG="${APP_ICON_PNG:-Resources/AppIcon.png}"
+[[ "$ICON_PNG" = /* ]] || ICON_PNG="$DIAGNOSTIC_DIR/$ICON_PNG"
+if [[ -f "$ICON_PNG" ]]; then
+    ICONSET="$BUILD_DIR/AppIcon.iconset"
+    rm -rf "$ICONSET" && mkdir -p "$ICONSET"
+    for size in 16 32 128 256 512; do
+        sips -z $size $size "$ICON_PNG" --out "$ICONSET/icon_${size}x${size}.png" >/dev/null
+        sips -z $((size * 2)) $((size * 2)) "$ICON_PNG" --out "$ICONSET/icon_${size}x${size}@2x.png" >/dev/null
+    done
+    iconutil -c icns "$ICONSET" -o "$APP_PATH/Contents/Resources/AppIcon.icns"
+    rm -rf "$ICONSET"
+else
+    echo -e "${YELLOW}Warning: no app icon at $ICON_PNG; the app will use the generic icon${NC}"
+fi
 
 # Create Info.plist
 cat > "$APP_PATH/Contents/Info.plist" << EOF
