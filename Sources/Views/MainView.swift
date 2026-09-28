@@ -223,11 +223,6 @@ struct MainView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-
-                Button("Done") {
-                    NSApplication.shared.terminate(nil)
-                }
-                .buttonStyle(.bordered)
             }
         }
         .padding()
@@ -327,11 +322,6 @@ struct MainView: View {
                 }
                 .buttonStyle(.bordered)
                 .modifier(ProminentIf(viewModel.config.supportEmail.isEmpty))
-
-                Button("Done") {
-                    NSApplication.shared.terminate(nil)
-                }
-                .buttonStyle(.bordered)
             }
         }
         .padding()
