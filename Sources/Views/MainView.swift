@@ -732,7 +732,7 @@ class DiagnosticViewModel: ObservableObject {
                                                               enabled: anonymize).utf8)
                 pendingNote = anonymizeDiagnosticText(lastFeedback, enabled: anonymize)
                 pendingReport = anonymizeDiagnosticText(
-                    renderDiagnosticReport(diagnosticData, appName: config.appName, appVersion: config.appVersion),
+                    renderDiagnosticReport(diagnosticData, appName: config.appName, appVersion: config.appVersion, kit: config.kit),
                     enabled: anonymize)
                 if autoSend {
                     await send(archive: archiveURL)

@@ -23,7 +23,7 @@ enum DiagnosticMain {
 
     private static func runSelfTest() {
         let config = AppConfig.load()
-        FileHandle.standardError.write(Data("[selftest] mode=localArchive app=\(config.appName) v\(config.appVersion)\n".utf8))
+        FileHandle.standardError.write(Data("[selftest] mode=localArchive app=\(config.appName) v\(config.appVersion) kit=\(config.kit.label)\n".utf8))
 
         let semaphore = DispatchSemaphore(value: 0)
         var exitCode: Int32 = 0

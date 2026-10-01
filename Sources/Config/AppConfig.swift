@@ -12,6 +12,8 @@ struct AppConfig {
     let appName: String
     let appIdentifier: String
     let appVersion: String
+    /// The DiagnosticKit build behind this app, independent of appVersion.
+    let kit: KitIdentity
 
     // Report intake (server/cloudflare). The key is injected at packaging
     // time, never committed.
@@ -106,7 +108,8 @@ struct AppConfig {
         return AppConfig(
             appName: env["APP_NAME"] ?? "Diagnostics",
             appIdentifier: env["APP_IDENTIFIER"] ?? "com.pulp.diagnostics",
-            appVersion: env["APP_VERSION"] ?? "1.0.0",
+            appVersion: resolveAppVersion(info: Bundle.main.infoDictionary ?? [:], env: env),
+            kit: KitIdentity.current,
             sendEndpoint: env["SEND_ENDPOINT"] ?? "",
             sendKey: env["SEND_KEY"] ?? "",
             githubRepo: env["GITHUB_REPO"] ?? "",
@@ -146,6 +149,14 @@ struct AppConfig {
             githubAPIRetries: Int(env["GITHUB_API_RETRIES"] ?? "3") ?? 3,
             debugMode: boolValue(env["DEBUG_MODE"], default: false)
         )
+    }
+
+    /// The version the product shipped this app under. The bundle's
+    /// CFBundleShortVersionString wins: a product's packaging may restamp it
+    /// after the build, and the report must name what the user installed.
+    static func resolveAppVersion(info: [String: Any], env: [String: String]) -> String {
+        if let short = info["CFBundleShortVersionString"] as? String, !short.isEmpty { return short }
+        return env["APP_VERSION"] ?? "unknown"
     }
 
     private static func boolValue(_ value: String?, default defaultValue: Bool) -> Bool {

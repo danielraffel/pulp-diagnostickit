@@ -1,0 +1,8 @@
+#!/bin/bash
+# Opt in with: git config core.hooksPath .githooks
+# Refuses a push whose app source changed without a VERSION bump; CI runs the
+# same check, this only fails sooner.
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+git fetch -q origin main 2>/dev/null || true
+exec "$root/Scripts/check_version_bump.sh" --base origin/main

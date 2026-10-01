@@ -36,7 +36,7 @@ class GitHubUploader {
 
     private func formatIssueBody(_ data: DiagnosticData) -> String {
         anonymizeDiagnosticText(
-            renderDiagnosticReport(data, appName: config.appName, appVersion: config.appVersion),
+            renderDiagnosticReport(data, appName: config.appName, appVersion: config.appVersion, kit: config.kit),
             enabled: config.anonymizeUsernames || config.excludeUserPaths)
     }
 

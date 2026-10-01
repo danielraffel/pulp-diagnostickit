@@ -57,7 +57,7 @@ final class LocalArchiveWriter {
 
             let anonymize = config.anonymizeUsernames || config.excludeUserPaths
             let report = anonymizeDiagnosticText(
-                renderDiagnosticReport(data, appName: config.appName, appVersion: config.appVersion),
+                renderDiagnosticReport(data, appName: config.appName, appVersion: config.appVersion, kit: config.kit),
                 enabled: anonymize)
             do {
                 try report.write(to: stageURL.appendingPathComponent("diagnostic_report.md"), atomically: true, encoding: .utf8)

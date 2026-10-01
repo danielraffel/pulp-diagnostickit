@@ -128,12 +128,47 @@ a selectable "Diagnostics Helper" component **if the app is present**, and
 the add-on just builds without it. Set `=0` to force it off.
 
 The archive also holds `findings.json` (schema `diagnostickit.findings.v1`):
-the product, macOS version, architecture, what is installed where, and every
-finding with its severity, for automated triage.
+the product, macOS version, architecture, what is installed where, the
+`diagnostickit` build that produced it, and every finding with its severity,
+for automated triage.
 
 Per-product `.env` keys beyond the identifiers: `STATE_DIRS` (colon-separated
 folders to summarise; default `~/Library/Application Support/<PLUGIN_NAME>`)
 and `STANDALONE_PROBE` (`false` to skip the editor render test).
+
+## Versioning
+
+The app carries two versions, and every report names both:
+
+- **App version** (`CFBundleShortVersionString`) is the version of the product
+  it ships with. `APP_VERSION` in `.env` sets it (default: the kit version),
+  and a product's packaging may restamp it so users see one number.
+- **Kit version** is DiagnosticKit's own: the `VERSION` file at the root of
+  this repository (`MAJOR.MINOR.PATCH`). `Scripts/build_app.sh` records it,
+  the exact commit, and whether tracked files were modified as the
+  `DiagnosticKitVersion`, `DiagnosticKitCommit` and `DiagnosticKitDirty`
+  Info.plist keys. The report footer and `findings.json` repeat them, so any
+  report traces back to the source that built it. The JUCE app reads the same
+  `VERSION` file.
+
+**No changes without versioning.** A change to what the app does (`Sources/`,
+`Resources/`, `Scripts/build_app.sh`, `Package.swift`, the entitlements, or
+the JUCE app's sources) raises `VERSION` in the same pull request: patch for a
+fix, minor for new behaviour or report content, major for a change a product's
+`.env` must adapt to. A released version is tagged `v<VERSION>` and frozen;
+`Scripts/check_version_bump.sh` fails if the app's sources differ from the tag
+for the current `VERSION`, or if a branch changes them without raising
+`VERSION` above its base. CI (`.github/workflows/version.yml`) runs it on every
+push and pull request, together with `Scripts/test_check_version_bump.sh`,
+which proves the check rejects a planted unversioned change. To fail before
+pushing instead, opt in to the same check locally:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+To release: merge, then tag the merge commit `v<VERSION>` and push the tag.
+Ship only builds from a clean, tagged commit (`DiagnosticKitDirty` false).
 
 ## Privacy
 

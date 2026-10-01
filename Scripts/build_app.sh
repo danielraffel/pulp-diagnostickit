@@ -41,6 +41,30 @@ mkdir -p "$BUILD_DIR"
 APP_NAME="${APP_NAME:-DiagnosticKit}"
 APP_BUNDLE_NAME="${APP_NAME}.app"
 
+# The kit's own identity, recorded in Info.plist and in every report: the
+# VERSION file, the exact commit, and whether tracked files were modified.
+# A product may ship the app under its own version (APP_VERSION, defaulting
+# to the kit version); these keys still say which kit source built it.
+KIT_VERSION="$(tr -d '[:space:]' < "$DIAGNOSTIC_DIR/VERSION" 2>/dev/null || true)"
+if [[ ! "$KIT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo -e "${RED}Error: VERSION must hold MAJOR.MINOR.PATCH, found '${KIT_VERSION}'${NC}"
+    exit 1
+fi
+if KIT_COMMIT="$(git -C "$DIAGNOSTIC_DIR" rev-parse --verify HEAD 2>/dev/null)"; then
+    if [[ -n "$(git -C "$DIAGNOSTIC_DIR" status --porcelain --untracked-files=no)" ]]; then
+        KIT_DIRTY=true
+        echo -e "${YELLOW}Warning: building from modified sources; the app records DiagnosticKitDirty=true${NC}"
+    else
+        KIT_DIRTY=false
+    fi
+else
+    KIT_COMMIT=unknown
+    KIT_DIRTY=true
+    echo -e "${YELLOW}Warning: not a git checkout; the app records no kit commit${NC}"
+fi
+APP_VERSION="${APP_VERSION:-$KIT_VERSION}"
+echo "DiagnosticKit $KIT_VERSION ($KIT_COMMIT$([[ $KIT_DIRTY == true ]] && echo ', modified')); app version $APP_VERSION"
+
 echo ""
 echo "Building Swift package..."
 
@@ -157,6 +181,12 @@ cat > "$APP_PATH/Contents/Info.plist" << EOF
     <string>${APP_VERSION}</string>
     <key>CFBundleVersion</key>
     <string>${APP_VERSION}</string>
+    <key>DiagnosticKitVersion</key>
+    <string>${KIT_VERSION}</string>
+    <key>DiagnosticKitCommit</key>
+    <string>${KIT_COMMIT}</string>
+    <key>DiagnosticKitDirty</key>
+    <${KIT_DIRTY}/>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>

@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
-project(DiagnosticKit VERSION 1.0.0)
+# VERSION at the repository root is the kit's one version source.
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/../VERSION" DIAGNOSTICKIT_VERSION LIMIT_COUNT 1)
+project(DiagnosticKit VERSION ${DIAGNOSTICKIT_VERSION})
 
 # ============================================================================
 # Development-only guard: DiagnosticKit is NOT a production release artifact.
